@@ -1,4 +1,4 @@
-using Common;
+using codecrafters_redis.src;
 using System.Net;
 using System.Net.Sockets;
 using System.Text;
@@ -6,12 +6,12 @@ using System.Text;
 int port = 6379;
 TcpListener server = new TcpListener(IPAddress.Any, port);
 server.Start();
-//Console.WriteLine($"Server started on port {port}. Waiting for connections...");
+Console.WriteLine($"Server started on port {port}. Waiting for connections...");
 
 while (true)
 {
     TcpClient client = await server.AcceptTcpClientAsync();
-    //Console.WriteLine("Client connected.");
+    Console.WriteLine("Client connected.");
     _ = HandleClientAsync(client);
 }
 
@@ -34,22 +34,22 @@ static async Task HandleClientAsync(TcpClient client)
             }
 
             string request = Encoding.UTF8.GetString(buffer, 0, bytesRead);
-            //Console.WriteLine($"Received: {request}");
+            Console.WriteLine($"Received: {request}");
 
             // Process the data here if necessary, and prepare a response
             string response = $"Server received: {request}";
 
             if (request == Constants.PING_REQUEST_COMMAND)
-                Console.WriteLine(Constants.PING_RESPOSNSE);
+                response = Constants.PING_RESPOSNSE;
 
             byte[] responseData = Encoding.UTF8.GetBytes(response);
 
             // Send response back to the client
             await stream.WriteAsync(responseData, 0, responseData.Length);
-            //Console.WriteLine("Response sent to client.");
+            Console.WriteLine("Response sent to client.");
         }
     }
 
     client.Close();
-    //Console.WriteLine("Client disconnected.");
+    Console.WriteLine("Client disconnected.");
 }
