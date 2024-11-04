@@ -37,15 +37,18 @@ static async Task HandleClientAsync(TcpClient client)
             Console.WriteLine($"Received: {request}");
 
             // Process the data here if necessary, and prepare a response
-            string response = $"Server received: {request}";
+            Protocol p = new Protocol(request);
+            await p.Write(stream);
 
-            if (request == Constants.PING_REQUEST_COMMAND)
-                response = Constants.PING_RESPOSNSE;
+           // string response = $"Server received: {request}";
 
-            byte[] responseData = Encoding.UTF8.GetBytes(response);
+            //if (request == Constants.PING_REQUEST_COMMAND)
+            //    response = Constants.PING_RESPOSNSE;
+
+            //byte[] responseData = Encoding.UTF8.GetBytes(response);
 
             // Send response back to the client
-            await stream.WriteAsync(responseData, 0, responseData.Length);
+            //await stream.WriteAsync(responseData, 0, responseData.Length);
             Console.WriteLine("Response sent to client.");
         }
     }
