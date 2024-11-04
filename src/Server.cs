@@ -7,7 +7,7 @@ int port = 6379;
 TcpListener server = new TcpListener(IPAddress.Any, port);
 server.Start();
 Console.WriteLine($"Server started on port {port}. Waiting for connections...");
-Dictionary<string, string> values = new Dictionary<string, string>();
+Dictionary<string, ItemValue> values = new Dictionary<string, ItemValue>();
 
 while (true)
 {
@@ -16,7 +16,7 @@ while (true)
     _ = HandleClientAsync(client, values);
 }
 
-static async Task HandleClientAsync(TcpClient client, Dictionary<string, string> values)
+static async Task HandleClientAsync(TcpClient client, Dictionary<string, ItemValue> values)
 {
     using (NetworkStream stream = client.GetStream())
     {

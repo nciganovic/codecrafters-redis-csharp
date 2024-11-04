@@ -1,5 +1,6 @@
 ﻿using System;
 using System.Collections.Generic;
+using System.ComponentModel.Design;
 using System.Linq;
 using System.Net.Sockets;
 using System.Text;
@@ -31,6 +32,7 @@ namespace codecrafters_redis.src
             ECHO,
             GET,
             SET,
+            PX
         }
 
         private readonly string command;
@@ -42,7 +44,7 @@ namespace codecrafters_redis.src
 
         }
 
-        public async Task Write(NetworkStream stream, Dictionary<string, string> values)
+        public async Task Write(NetworkStream stream, Dictionary<string, ItemValue> values)
         {
             List<string>? parameters = ParseCommand(command);
             
@@ -67,7 +69,15 @@ namespace codecrafters_redis.src
                 string key = parameters[1];
 
                 if (values.ContainsKey(key))
-                    response = BulkResponse(values[key]);
+                {
+                    if (values[key].ValidUntil > GetCurrentSeconds())
+                        response = BulkResponse(values[key].Value);
+                    else
+                    {
+                        values.Remove(key);
+                        response = NullResponse();
+                    }
+                }
                 else
                     response = NullResponse();
             }
@@ -79,7 +89,15 @@ namespace codecrafters_redis.src
                 string key = parameters[1];
                 string value = parameters[2];
 
-                values[key] = value;
+                double validUntil = double.MaxValue;
+
+                if (parameters.Count > 3 && parameters[3].ToUpper() == Enum.GetName(typeof(Commands), Commands.PX))
+                { 
+                    int timeToLive = Convert.ToInt32(parameters[4]);
+                    validUntil = GetCurrentSeconds() + timeToLive;
+                }
+
+                values[key] = new ItemValue { Value = value, ValidUntil = validUntil };
 
                 response = SimpleResponse(OK_RESPONSE);
             }
@@ -87,6 +105,8 @@ namespace codecrafters_redis.src
             byte[] responseData = Encoding.UTF8.GetBytes(response.ToString());
             await stream.WriteAsync(responseData, 0, responseData.Length);
         }
+
+        private double GetCurrentSeconds() => TimeSpan.FromTicks(DateTime.UtcNow.Ticks).TotalMilliseconds;
 
         private string SimpleResponse(string value)
         {
