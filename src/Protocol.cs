@@ -22,6 +22,8 @@ namespace codecrafters_redis.src
         private const string SPACE_SING = "\r\n";
 
         private const string PING_RESPONSE = "PONG";
+        private const string OK_RESPONSE = "OK";
+        private const string NULL_RESPONSE = "-1";
 
         private enum Commands
         { 
@@ -40,7 +42,7 @@ namespace codecrafters_redis.src
 
         }
 
-        public async Task Write(NetworkStream stream)
+        public async Task Write(NetworkStream stream, Dictionary<string, string> values)
         {
             List<string>? parameters = ParseCommand(command);
             
@@ -49,29 +51,70 @@ namespace codecrafters_redis.src
 
             string action = parameters[0];
 
-            StringBuilder response = new StringBuilder();
-            
+            string response = string.Empty;
+
             if (action.ToUpper() == Enum.GetName(typeof(Commands), Commands.PING))
-            {
-                response.Append(PLUS_CHAR);
-                response.Append(PING_RESPONSE);
-                response.Append(SPACE_SING);
-            }
+                response = SimpleResponse(PING_RESPONSE);
             else if (action.ToUpper() == Enum.GetName(typeof(Commands), Commands.ECHO))
             {
                 if (parameters.Count != 2)
                     throw new Exception("ECHO comamnd excpects one parameter");
 
-                response.Append(DOLLAR_CHAR);
-                response.Append(parameters[1].Length);
-                response.Append(SPACE_SING);
-                response.Append(parameters[1]);
-                response.Append(SPACE_SING);
+                response = BulkResponse(parameters[1]);
+            }
+            else if (action.ToUpper() == Enum.GetName(typeof(Commands), Commands.GET))
+            {
+                string key = parameters[1];
+
+                if (values.ContainsKey(key))
+                    response = BulkResponse(values[key]);
+                else
+                    response = NullResponse();
+            }
+            else if (action.ToUpper() == Enum.GetName(typeof(Commands), Commands.SET))
+            {
+                if (parameters.Count < 2)
+                    throw new Exception("SET command requiers at least 2 parameters, key and value");
+
+                string key = parameters[1];
+                string value = parameters[2];
+
+                values[key] = value;
+
+                response = SimpleResponse(OK_RESPONSE);
             }
 
             byte[] responseData = Encoding.UTF8.GetBytes(response.ToString());
-
             await stream.WriteAsync(responseData, 0, responseData.Length);
+        }
+
+        private string SimpleResponse(string value)
+        {
+            string echo = string.Empty;
+            echo += PLUS_CHAR;
+            echo += value;
+            echo += SPACE_SING;
+            return echo;
+        }
+
+        private string BulkResponse(string value)
+        {
+            string echo = string.Empty;
+            echo += DOLLAR_CHAR;
+            echo += value.Length;
+            echo += SPACE_SING;
+            echo += value;
+            echo += SPACE_SING;
+            return echo;
+        }
+
+        private string NullResponse()
+        {
+            string response = string.Empty;
+            response += DOLLAR_CHAR;
+            response += NULL_RESPONSE;
+            response += SPACE_SING;
+            return response;
         }
 
         private List<string>? ParseCommand(string command)

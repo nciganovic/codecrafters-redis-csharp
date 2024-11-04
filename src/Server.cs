@@ -7,15 +7,16 @@ int port = 6379;
 TcpListener server = new TcpListener(IPAddress.Any, port);
 server.Start();
 Console.WriteLine($"Server started on port {port}. Waiting for connections...");
+Dictionary<string, string> values = new Dictionary<string, string>();
 
 while (true)
 {
     TcpClient client = await server.AcceptTcpClientAsync();
     Console.WriteLine("Client connected.");
-    _ = HandleClientAsync(client);
+    _ = HandleClientAsync(client, values);
 }
 
-static async Task HandleClientAsync(TcpClient client)
+static async Task HandleClientAsync(TcpClient client, Dictionary<string, string> values)
 {
     using (NetworkStream stream = client.GetStream())
     {
@@ -38,17 +39,8 @@ static async Task HandleClientAsync(TcpClient client)
 
             // Process the data here if necessary, and prepare a response
             Protocol p = new Protocol(request);
-            await p.Write(stream);
+            await p.Write(stream, values);
 
-           // string response = $"Server received: {request}";
-
-            //if (request == Constants.PING_REQUEST_COMMAND)
-            //    response = Constants.PING_RESPOSNSE;
-
-            //byte[] responseData = Encoding.UTF8.GetBytes(response);
-
-            // Send response back to the client
-            //await stream.WriteAsync(responseData, 0, responseData.Length);
             Console.WriteLine("Response sent to client.");
         }
     }
