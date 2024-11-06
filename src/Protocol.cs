@@ -32,26 +32,27 @@ namespace codecrafters_redis.src
             ECHO,
             GET,
             SET,
-            PX
+            PX, 
+            CONFIG
         }
 
         private readonly string command;
+        private readonly Dictionary<string, string> parameters;
 
-        public Protocol(string comamnd)
+        public Protocol(string comamnd, Dictionary<string, string> parameters)
         {
             this.command = comamnd;
-            List<string> parameters = new List<string>();
-
+            this.parameters = parameters;   
         }
 
         public async Task Write(NetworkStream stream, Dictionary<string, ItemValue> values)
         {
-            List<string>? parameters = ParseCommand(command);
+            List<string>? commandParams = ParseCommand(command);
             
-            if (parameters == null)
+            if (commandParams == null)
                 return;
 
-            string action = parameters[0];
+            string action = commandParams[0];
 
             string response = string.Empty;
 
@@ -59,14 +60,14 @@ namespace codecrafters_redis.src
                 response = SimpleResponse(PING_RESPONSE);
             else if (action.ToUpper() == Enum.GetName(typeof(Commands), Commands.ECHO))
             {
-                if (parameters.Count != 2)
+                if (commandParams.Count != 2)
                     throw new Exception("ECHO comamnd excpects one parameter");
 
-                response = BulkResponse(parameters[1]);
+                response = BulkResponse(commandParams[1]);
             }
             else if (action.ToUpper() == Enum.GetName(typeof(Commands), Commands.GET))
             {
-                string key = parameters[1];
+                string key = commandParams[1];
 
                 if (values.ContainsKey(key))
                 {
@@ -83,23 +84,37 @@ namespace codecrafters_redis.src
             }
             else if (action.ToUpper() == Enum.GetName(typeof(Commands), Commands.SET))
             {
-                if (parameters.Count < 2)
+                if (commandParams.Count < 2)
                     throw new Exception("SET command requiers at least 2 parameters, key and value");
 
-                string key = parameters[1];
-                string value = parameters[2];
+                string key = commandParams[1];
+                string value = commandParams[2];
 
                 double validUntil = double.MaxValue;
 
-                if (parameters.Count > 3 && parameters[3].ToUpper() == Enum.GetName(typeof(Commands), Commands.PX))
-                { 
-                    int timeToLive = Convert.ToInt32(parameters[4]);
+                if (commandParams.Count > 3 && commandParams[3].ToUpper() == Enum.GetName(typeof(Commands), Commands.PX))
+                {
+                    int timeToLive = Convert.ToInt32(commandParams[4]);
                     validUntil = GetCurrentSeconds() + timeToLive;
                 }
 
                 values[key] = new ItemValue { Value = value, ValidUntil = validUntil };
 
                 response = SimpleResponse(OK_RESPONSE);
+            }
+            else if (action.ToUpper() == Enum.GetName(typeof(Commands), Commands.CONFIG))
+            {
+                if (commandParams.Count != 3)
+                    throw new Exception("CONFIG parameter expects 2 parameters");
+
+                if (commandParams[1].ToUpper() == Enum.GetName(typeof(Commands), Commands.GET))
+                {
+                    if (parameters.ContainsKey(commandParams[2]))
+                    {
+                        string[] elements = { commandParams[2], parameters[commandParams[2]] };
+                        response = ArrayResponse(elements);
+                    }
+                }
             }
 
             byte[] responseData = Encoding.UTF8.GetBytes(response.ToString());
@@ -114,6 +129,19 @@ namespace codecrafters_redis.src
             echo += PLUS_CHAR;
             echo += value;
             echo += SPACE_SING;
+            return echo;
+        }
+
+        private string ArrayResponse(string[] elements)
+        {
+            string echo = string.Empty;
+            echo += ASTERISK_CHAR;
+            echo += elements.Length;
+            echo += SPACE_SING;
+            foreach (var element in elements)
+            {
+                echo += BulkResponse(element);
+            }
             return echo;
         }
 

@@ -1,0 +1,8 @@
+{
+  "profiles": {
+    "codecrafters-redis": {
+      "commandName": "Project",
+      "commandLineArgs": "--dir /tmp/redis-files --dbfilename dump.rdb"
+    }
+  }
+}
