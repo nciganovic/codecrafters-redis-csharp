@@ -3,6 +3,8 @@ using System.Net;
 using System.Net.Sockets;
 using System.Text;
 
+// echo -ne "*2\r\n$4\r\nKEYS\r\n$1\r\n*\r\n" | nc localhost 6380
+
 int port = 6379;
 TcpListener server = new TcpListener(IPAddress.Any, port);
 server.Start();
@@ -13,9 +15,13 @@ Dictionary<string, string> parameters = CollectParameters(args);
 
 if (parameters.ContainsKey("dir") && parameters.ContainsKey("dbfilename"))
 {
-    string path = Path.Combine(parameters["dir"].Split("/"));
-    Directory.CreateDirectory(path);
-    File.Create(Path.Combine(path, parameters["dbfilename"])).Dispose();
+    string dir = $"{parameters["dir"]}/{parameters["dbfilename"]}";
+
+    if (File.Exists(dir))
+    { 
+        var reader = new RDSFileReader(dir, true);
+        values = reader.rdsDatabse;
+    }
 }
 
 while (true)
@@ -63,15 +69,12 @@ static Dictionary<string, string> CollectParameters(string[] args)
     Dictionary<string, string> keyValuePairs = new Dictionary<string, string>();
     if (args.Length > 0)
     {
-        for (int i = 0; i < args.Length; i++)
+        for (int i = 0; i < args.Length; i += 2)
         {
-            if (i % 2 != 0)
-            {
-                if (args[i - 1].IndexOf("--") != -1)
-                    args[i - 1] = args[i - 1].Replace("--", "");
+            if (args[i].IndexOf("--") != -1)
+                args[i] = args[i].Replace("--", "");
 
-                keyValuePairs[args[i - 1]] = args[i];
-            }
+            keyValuePairs[args[i]] = args[i + 1];
         }
     }
     return keyValuePairs;

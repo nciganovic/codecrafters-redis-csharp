@@ -5,6 +5,7 @@ using System.Linq;
 using System.Net.Sockets;
 using System.Text;
 using System.Threading.Tasks;
+using System.Xml.Linq;
 
 
 // *n - number of parameters 
@@ -33,7 +34,8 @@ namespace codecrafters_redis.src
             GET,
             SET,
             PX, 
-            CONFIG
+            CONFIG,
+            KEYS
         }
 
         private readonly string command;
@@ -71,7 +73,7 @@ namespace codecrafters_redis.src
 
                 if (values.ContainsKey(key))
                 {
-                    if (values[key].ValidUntil > GetCurrentSeconds())
+                    if (values[key].IsValid)
                         response = BulkResponse(values[key].Value);
                     else
                     {
@@ -90,22 +92,19 @@ namespace codecrafters_redis.src
                 string key = commandParams[1];
                 string value = commandParams[2];
 
-                double validUntil = double.MaxValue;
+                int timeToLive = int.MaxValue;
 
                 if (commandParams.Count > 3 && commandParams[3].ToUpper() == Enum.GetName(typeof(Commands), Commands.PX))
-                {
-                    int timeToLive = Convert.ToInt32(commandParams[4]);
-                    validUntil = GetCurrentSeconds() + timeToLive;
-                }
+                    timeToLive = Convert.ToInt32(commandParams[4]);
 
-                values[key] = new ItemValue { Value = value, ValidUntil = validUntil };
+                values[key] = new ItemValue(value, timeToLive);
 
                 response = SimpleResponse(OK_RESPONSE);
             }
             else if (action.ToUpper() == Enum.GetName(typeof(Commands), Commands.CONFIG))
             {
                 if (commandParams.Count != 3)
-                    throw new Exception("CONFIG parameter expects 2 parameters");
+                    throw new Exception("wrong number of parameters for config command");
 
                 if (commandParams[1].ToUpper() == Enum.GetName(typeof(Commands), Commands.GET))
                 {
@@ -116,12 +115,32 @@ namespace codecrafters_redis.src
                     }
                 }
             }
+            else if (action.ToUpper() == Enum.GetName(typeof(Commands), Commands.KEYS))
+            {
+                if (commandParams.Count != 2)
+                    throw new Exception("wrong number of arguments for 'keys' command");
+
+                string pattern = commandParams[1];
+                
+                //select all keys
+                if (pattern == $"{ASTERISK_CHAR}")
+                {
+                    List<string> keys = new List<string>();
+                    foreach (string key in values.Keys)
+                    {
+                        if(values[key].IsValid)
+                            keys.Add(key);
+                        else
+                            values.Remove(key);
+                    }
+
+                    response = ArrayResponse(keys.ToArray());
+                }
+            }
 
             byte[] responseData = Encoding.UTF8.GetBytes(response.ToString());
             await stream.WriteAsync(responseData, 0, responseData.Length);
         }
-
-        private double GetCurrentSeconds() => TimeSpan.FromTicks(DateTime.UtcNow.Ticks).TotalMilliseconds;
 
         private string SimpleResponse(string value)
         {
@@ -186,6 +205,7 @@ namespace codecrafters_redis.src
             commandParams.RemoveAt(0);
             commandParams.RemoveAt(commandParams.Count - 1);
             commandParams.RemoveAll(x => x.IndexOf('$') != -1);
+            commandParams.RemoveAll(x => x == string.Empty);
             return commandParams;
         }
     }
