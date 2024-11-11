@@ -92,10 +92,10 @@ namespace codecrafters_redis.src
                 string key = commandParams[1];
                 string value = commandParams[2];
 
-                int timeToLive = int.MaxValue;
+                double timeToLive = double.MaxValue;
 
                 if (commandParams.Count > 3 && commandParams[3].ToUpper() == Enum.GetName(typeof(Commands), Commands.PX))
-                    timeToLive = Convert.ToInt32(commandParams[4]);
+                    timeToLive = Convert.ToDouble(commandParams[4]);
 
                 values[key] = new ItemValue(value, timeToLive);
 

@@ -10,6 +10,8 @@ namespace codecrafters_redis.src
     public class RDSFileReader
     {
         private const byte DB_INDICATOR = 0xFB;
+        private const byte EXPIRY_IN_SECONDS = 0xFD;
+        private const byte EXPIRY_IN_MILISECONDS = 0xFC;
         private const int STRING_VALUE_TYPE = 0;
 
         private readonly string fileLocation;
@@ -18,14 +20,6 @@ namespace codecrafters_redis.src
 
         public RDSFileReader(string fileLocation, bool loadItems = false)
         {
-            //TODO maybe add check for --dir and --dbfilename separetly
-
-            //if (!File.Exists(fileLocation))
-            //{
-            //    throw new Exception("FILE NOT FOUND!!!");
-                //File.Create(fileLocation);
-            //}
-
             this.fileLocation = fileLocation;
             rdsDatabse = new Dictionary<string, ItemValue>();
 
@@ -72,17 +66,58 @@ namespace codecrafters_redis.src
 
             while (hashTableSize > 0)
             { 
-                int valueType = reader.ReadByte();
-                if(valueType != STRING_VALUE_TYPE)
-                    throw new Exception("Only string encodings are supported.");
+                int nextByte = reader.ReadByte();
 
-                int keySize = reader.ReadByte();
-                string key = new string(reader.ReadChars(keySize));
+                if (nextByte == EXPIRY_IN_MILISECONDS)
+                {
+                    byte[] bytes = reader.ReadBytes(8);
+                    long timestamp = BitConverter.ToInt64(bytes, 0);
+                    long unixTime = ((DateTimeOffset)DateTime.UtcNow).ToUnixTimeSeconds() * 1000;
 
-                int valueSize = reader.ReadByte();
-                string value = new string(reader.ReadChars(valueSize));
+                    int valueType = reader.ReadByte();
+                    if (valueType != STRING_VALUE_TYPE)
+                        throw new Exception("Only string value type is supported");
 
-                rdsDatabse.Add(key, new ItemValue(value));
+                    int keySize = reader.ReadByte();
+                    string key = new string(reader.ReadChars(keySize));
+
+                    int valueSize = reader.ReadByte();
+                    string value = new string(reader.ReadChars(valueSize));
+
+                    double ttl = timestamp - unixTime;
+
+                    rdsDatabse.Add(key, new ItemValue(value, ttl));
+                }
+                else if (nextByte == EXPIRY_IN_SECONDS)
+                {
+                    byte[] bytes = reader.ReadBytes(4);
+                    long timestamp = BitConverter.ToInt64(bytes, 0);
+                    long unixTime = ((DateTimeOffset)DateTime.UtcNow).ToUnixTimeSeconds();
+
+                    int valueType = reader.ReadByte();
+                    if (valueType != STRING_VALUE_TYPE)
+                        throw new Exception("Only string value type is supported");
+
+                    int keySize = reader.ReadByte();
+                    string key = new string(reader.ReadChars(keySize));
+
+                    int valueSize = reader.ReadByte();
+                    string value = new string(reader.ReadChars(valueSize));
+
+                    double ttl = (timestamp - unixTime) * 1000; //Convert to miliseconds
+
+                    rdsDatabse.Add(key, new ItemValue(value, ttl));
+                }
+                else if (nextByte == STRING_VALUE_TYPE)
+                {
+                    int keySize = reader.ReadByte();
+                    string key = new string(reader.ReadChars(keySize));
+
+                    int valueSize = reader.ReadByte();
+                    string value = new string(reader.ReadChars(valueSize));
+
+                    rdsDatabse.Add(key, new ItemValue(value));
+                }
 
                 hashTableSize--;
             }
