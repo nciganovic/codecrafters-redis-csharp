@@ -5,13 +5,14 @@ using System.Text;
 
 // echo -ne "*2\r\n$4\r\nKEYS\r\n$1\r\n*\r\n" | nc localhost 6380
 
-int port = 6379;
+Dictionary<string, ItemValue> values = new Dictionary<string, ItemValue>();
+Dictionary<string, string> parameters = CollectParameters(args);
+
+int port = parameters.ContainsKey("port") && int.TryParse(parameters["port"], out _) ? Convert.ToInt32(parameters["port"]) : 6379;
+
 TcpListener server = new TcpListener(IPAddress.Any, port);
 server.Start();
 Console.WriteLine($"Server started on port {port}. Waiting for connections...");
-
-Dictionary<string, ItemValue> values = new Dictionary<string, ItemValue>();
-Dictionary<string, string> parameters = CollectParameters(args);
 
 if (parameters.ContainsKey("dir") && parameters.ContainsKey("dbfilename"))
 {
