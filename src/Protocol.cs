@@ -41,37 +41,36 @@ namespace codecrafters_redis.src
         }
 
         private readonly string command;
-        private readonly Dictionary<string, string> parameters;
+        private readonly Dictionary<string, string> serverParameters;
 
         public Protocol(string comamnd, Dictionary<string, string> parameters)
         {
             this.command = comamnd;
-            this.parameters = parameters;   
+            this.serverParameters = parameters;   
         }
 
         public async Task Write(NetworkStream stream, Dictionary<string, ItemValue> values)
         {
-            List<string>? commandParams = ParseCommand(command);
+            ParsedCommand parsedCommand = ParseCommand(command);
             
-            if (commandParams == null)
+            if (parsedCommand.CommandActions == null)
                 return;
 
-            string action = commandParams[0];
-
+            string action = parsedCommand.CommandActions[0];
             string response = string.Empty;
 
             if (action.ToUpper() == Enum.GetName(typeof(Commands), Commands.PING))
                 response = SimpleResponse(PING_RESPONSE);
             else if (action.ToUpper() == Enum.GetName(typeof(Commands), Commands.ECHO))
             {
-                if (commandParams.Count != 2)
+                if (parsedCommand.CommandActions.Count != 2)
                     throw new Exception("ECHO comamnd excpects one parameter");
 
-                response = BulkResponse(commandParams[1]);
+                response = BulkResponse(parsedCommand.CommandActions[1]);
             }
             else if (action.ToUpper() == Enum.GetName(typeof(Commands), Commands.GET))
             {
-                string key = commandParams[1];
+                string key = parsedCommand.CommandActions[1];
 
                 if (values.ContainsKey(key))
                 {
@@ -88,16 +87,16 @@ namespace codecrafters_redis.src
             }
             else if (action.ToUpper() == Enum.GetName(typeof(Commands), Commands.SET))
             {
-                if (commandParams.Count < 2)
+                if (parsedCommand.CommandActions.Count < 2)
                     throw new Exception("SET command requiers at least 2 parameters, key and value");
 
-                string key = commandParams[1];
-                string value = commandParams[2];
+                string key = parsedCommand.CommandActions[1];
+                string value = parsedCommand.CommandActions[2];
 
                 double timeToLive = double.MaxValue;
 
-                if (commandParams.Count > 3 && commandParams[3].ToUpper() == Enum.GetName(typeof(Commands), Commands.PX))
-                    timeToLive = Convert.ToDouble(commandParams[4]);
+                if (parsedCommand.CommandActions.Count > 3 && parsedCommand.CommandActions[3].ToUpper() == Enum.GetName(typeof(Commands), Commands.PX))
+                    timeToLive = Convert.ToDouble(parsedCommand.CommandActions[4]);
 
                 values[key] = new ItemValue(value, timeToLive);
 
@@ -105,24 +104,24 @@ namespace codecrafters_redis.src
             }
             else if (action.ToUpper() == Enum.GetName(typeof(Commands), Commands.CONFIG))
             {
-                if (commandParams.Count != 3)
+                if (parsedCommand.CommandActions.Count != 3)
                     throw new Exception("wrong number of parameters for config command");
 
-                if (commandParams[1].ToUpper() == Enum.GetName(typeof(Commands), Commands.GET))
+                if (parsedCommand.CommandActions[1].ToUpper() == Enum.GetName(typeof(Commands), Commands.GET))
                 {
-                    if (parameters.ContainsKey(commandParams[2]))
+                    if (serverParameters.ContainsKey(parsedCommand.CommandActions[2]))
                     {
-                        string[] elements = { commandParams[2], parameters[commandParams[2]] };
+                        string[] elements = { parsedCommand.CommandActions[2], serverParameters[parsedCommand.CommandActions[2]] };
                         response = ArrayResponse(elements);
                     }
                 }
             }
             else if (action.ToUpper() == Enum.GetName(typeof(Commands), Commands.KEYS))
             {
-                if (commandParams.Count != 2)
+                if (parsedCommand.CommandActions.Count != 2)
                     throw new Exception("wrong number of arguments for 'keys' command");
 
-                string pattern = commandParams[1];
+                string pattern = parsedCommand.CommandActions[1];
 
                 //select all keys
                 if (pattern == $"{ASTERISK_CHAR}")
@@ -141,17 +140,23 @@ namespace codecrafters_redis.src
             }
             else if (action.ToUpper() == Enum.GetName(typeof(Commands), Commands.INFO))
             {
-                if(commandParams.Count != 2)
+                Console.WriteLine("enter info command");
+
+                if(parsedCommand.CommandActions.Count != 2)
                     throw new Exception("wrong number of arguments for 'info' command");
 
-                string infoType = commandParams[1];
+                string infoType = parsedCommand.CommandActions[1];
                 if (infoType != "replication")
                     throw new Exception("unsupported type of info command");
 
-                string role = "master";
+                string role = serverParameters.ContainsKey("replicaof") ? "slave" : "master";
                 string info = $"role:{role}";
 
+                Console.WriteLine("info" + info);
+
                 response = BulkResponse(info);
+
+                Console.WriteLine("response" + response);
             }
 
             byte[] responseData = Encoding.UTF8.GetBytes(response.ToString());
@@ -200,29 +205,52 @@ namespace codecrafters_redis.src
             return response;
         }
 
-        private List<string>? ParseCommand(string command)
+        private ParsedCommand ParseCommand(string command)
         {
-            List<string> commandParams = command.Split(SPACE_SING).ToList();
+            List<string> commands = command.Split(SPACE_SING).ToList();
             
-            if (commandParams.Count == 0)
+            if (commands.Count == 0)
                 throw new ArgumentException($"Invalid command, no \\r\\n found");
 
-            if (commandParams[0].IndexOf(ASTERISK_CHAR) == -1)
+            if (commands[0].IndexOf(ASTERISK_CHAR) == -1)
                 throw new ArgumentException($"{ASTERISK_CHAR} required as first parameter");
 
-            int paramCount = Convert.ToInt32(commandParams[0].Split(ASTERISK_CHAR)[1]);
+            int paramCount = Convert.ToInt32(commands[0].Split(ASTERISK_CHAR)[1]);
 
             if (paramCount == -1)
-                return null;
+                return new ParsedCommand();
 
-            if(paramCount == 0)
-                return new List<string>();
+            if (paramCount == 0)
+                return new ParsedCommand();
 
-            commandParams.RemoveAt(0);
-            commandParams.RemoveAt(commandParams.Count - 1);
-            commandParams.RemoveAll(x => x.IndexOf('$') != -1);
-            commandParams.RemoveAll(x => x == string.Empty);
-            return commandParams;
+            commands.RemoveAt(0);
+            commands.RemoveAt(commands.Count - 1);
+            commands.RemoveAll(x => x.IndexOf('$') != -1);
+            commands.RemoveAll(x => x == string.Empty);
+
+            List<int> commandParamsToRemove = new List<int>();
+
+            Dictionary<string, string> commandParams = new Dictionary<string, string>();
+            for (int i = 0; i < commands.Count - 1; i++)
+            {
+                if (commands[i][0] == '-')
+                { 
+                    commandParams.Add(commands[i], commands[i + 1]);
+                    commandParamsToRemove.Insert(0, i);
+                    commandParamsToRemove.Insert(0, i + 1);
+                }
+            }
+
+            foreach(int cmd in commandParamsToRemove)
+                commands.RemoveAt(cmd);
+
+            return new ParsedCommand { CommandActions = commands, CommandParams = commandParams };
         }
+    }
+
+    class ParsedCommand
+    {
+        public List<string>? CommandActions { get; set; }
+        public Dictionary<string, string> CommandParams { get; set; } = new Dictionary<string, string>();
     }
 }

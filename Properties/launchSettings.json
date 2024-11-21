@@ -2,7 +2,7 @@
   "profiles": {
     "codecrafters-redis": {
       "commandName": "Project",
-      "commandLineArgs": "INFO replication"
+      "commandLineArgs": "--port 6380 --replicaof \"localhost 6379\""
     }
   }
 }
