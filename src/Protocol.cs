@@ -6,6 +6,7 @@ using System.Net.Sockets;
 using System.Text;
 using System.Threading.Tasks;
 using System.Xml.Linq;
+using static System.Net.Mime.MediaTypeNames;
 
 
 // *n - number of parameters 
@@ -35,7 +36,8 @@ namespace codecrafters_redis.src
             SET,
             PX, 
             CONFIG,
-            KEYS
+            KEYS,
+            INFO
         }
 
         private readonly string command;
@@ -121,14 +123,14 @@ namespace codecrafters_redis.src
                     throw new Exception("wrong number of arguments for 'keys' command");
 
                 string pattern = commandParams[1];
-                
+
                 //select all keys
                 if (pattern == $"{ASTERISK_CHAR}")
                 {
                     List<string> keys = new List<string>();
                     foreach (string key in values.Keys)
                     {
-                        if(values[key].IsValid)
+                        if (values[key].IsValid)
                             keys.Add(key);
                         else
                             values.Remove(key);
@@ -136,6 +138,20 @@ namespace codecrafters_redis.src
 
                     response = ArrayResponse(keys.ToArray());
                 }
+            }
+            else if (action.ToUpper() == Enum.GetName(typeof(Commands), Commands.INFO))
+            {
+                if(commandParams.Count != 2)
+                    throw new Exception("wrong number of arguments for 'info' command");
+
+                string infoType = commandParams[1];
+                if (infoType != "replication")
+                    throw new Exception("unsupported type of info command");
+
+                string role = "master";
+                string info = $"role:{role}";
+
+                response = BulkResponse(info);
             }
 
             byte[] responseData = Encoding.UTF8.GetBytes(response.ToString());

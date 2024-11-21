@@ -2,7 +2,7 @@
   "profiles": {
     "codecrafters-redis": {
       "commandName": "Project",
-      "commandLineArgs": "--dir /tmp/rdbfiles1086750299 --dbfilename pear.rdb --port 6380"
+      "commandLineArgs": "INFO replication"
     }
   }
 }
