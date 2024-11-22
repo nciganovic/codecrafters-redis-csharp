@@ -152,11 +152,12 @@ namespace codecrafters_redis.src
                 string role = serverParameters.ContainsKey("replicaof") ? "slave" : "master";
                 string info = $"role:{role}";
 
-                Console.WriteLine("info" + info);
+                string[] items = new string[3];
+                items[0] = info;
+                items[1] = $"master_replid:{GenerateAlphanumericString()}";
+                items[2] = "master_repl_offset:0";
 
-                response = BulkResponse(info);
-
-                Console.WriteLine("response" + response);
+                response = BulkResponse(string.Join(SPACE_SING, items));
             }
 
             byte[] responseData = Encoding.UTF8.GetBytes(response.ToString());
@@ -245,6 +246,20 @@ namespace codecrafters_redis.src
                 commands.RemoveAt(cmd);
 
             return new ParsedCommand { CommandActions = commands, CommandParams = commandParams };
+        }
+
+        public static string GenerateAlphanumericString(int length = 40)
+        {
+            const string chars = "abcdefghijklmnopqrstuvwxyz0123456789";
+            var random = new Random();
+            var result = new StringBuilder(length);
+
+            for (int i = 0; i < length; i++)
+            {
+                result.Append(chars[random.Next(chars.Length)]);
+            }
+
+            return result.ToString();
         }
     }
 
