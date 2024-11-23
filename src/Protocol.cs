@@ -162,6 +162,7 @@ namespace codecrafters_redis.src
 
             byte[] responseData = Encoding.UTF8.GetBytes(response.ToString());
             await stream.WriteAsync(responseData, 0, responseData.Length);
+            Console.WriteLine("Response sent: " + response.ToString());
         }
 
         private string SimpleResponse(string value)
@@ -248,7 +249,7 @@ namespace codecrafters_redis.src
             return new ParsedCommand { CommandActions = commands, CommandParams = commandParams };
         }
 
-        public static string GenerateAlphanumericString(int length = 40)
+        static string GenerateAlphanumericString(int length = 40)
         {
             const string chars = "abcdefghijklmnopqrstuvwxyz0123456789";
             var random = new Random();

@@ -1,4 +1,5 @@
 using codecrafters_redis.src;
+using System;
 using System.Net;
 using System.Net.Sockets;
 using System.Text;
@@ -25,11 +26,57 @@ if (parameters.ContainsKey("dir") && parameters.ContainsKey("dbfilename"))
     }
 }
 
-while (true)
+if (parameters.ContainsKey("replicaof"))
 {
+    string[] replicaofValues = parameters["replicaof"].Split(' ');
+    string masterHost = replicaofValues[0];
+    string masterPort = replicaofValues[1];
+
+    int masterPortValue;
+    bool isConverted = int.TryParse(masterPort, out masterPortValue);
+    if (!isConverted)
+        throw new Exception("Port value is not in valid format");
+
+    TcpClient masterClient = new TcpClient();
+    masterClient.Connect(masterHost, masterPortValue);
+    Console.WriteLine("Connected to master:" + masterHost + " at " + masterPortValue);
+    _ = HandleMasterServerAsync(masterClient);
+}
+
+while (true)
+{   
     TcpClient client = await server.AcceptTcpClientAsync();
     Console.WriteLine("Client connected.");
     _ = HandleClientAsync(client, values, parameters);
+}
+
+static async Task HandleMasterServerAsync(TcpClient client)
+{
+    using (NetworkStream stream = client.GetStream())
+    {
+        string message = "*1\r\n$4\r\nPING\r\n";
+        byte[] data = Encoding.UTF8.GetBytes(message);
+        stream.Write(data, 0, data.Length);
+        Console.WriteLine($"Sent: {message}");
+
+        byte[] buffer = new byte[1024];
+        bool connected = true;
+
+        while (connected)
+        {
+            // Receive data from the client
+            int bytesRead = await stream.ReadAsync(buffer, 0, buffer.Length);
+
+            if (bytesRead == 0) // Client disconnected
+            {
+                connected = false;
+                break;
+            }
+
+            string request = Encoding.UTF8.GetString(buffer, 0, bytesRead);
+            Console.WriteLine($"Received: {request}");
+        }
+    }
 }
 
 static async Task HandleClientAsync(TcpClient client, Dictionary<string, ItemValue> values, Dictionary<string, string> parameters)
@@ -56,8 +103,6 @@ static async Task HandleClientAsync(TcpClient client, Dictionary<string, ItemVal
             // Process the data here if necessary, and prepare a response
             Protocol p = new Protocol(request, parameters);
             await p.Write(stream, values);
-
-            Console.WriteLine("Response sent to client.");
         }
     }
 
