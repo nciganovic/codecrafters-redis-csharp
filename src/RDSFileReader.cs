@@ -9,6 +9,7 @@ namespace codecrafters_redis.src
 {
     public class RDSFileReader
     {
+        private const byte DB_START = 0xFE;
         private const byte DB_INDICATOR = 0xFB;
         private const byte EXPIRY_IN_SECONDS = 0xFD;
         private const byte EXPIRY_IN_MILISECONDS = 0xFC;
@@ -35,15 +36,13 @@ namespace codecrafters_redis.src
                 {
                     var header = new string(reader.ReadChars(9));
                     if (header != "REDIS0011")
-                    {
                         throw new Exception("Header not equal to REDIS0011");
-                    }
 
                     while (true)
                     {
                         // find the database section
                         byte dbStart = reader.ReadByte();
-                        if (dbStart == 0xFE)
+                        if (dbStart == DB_START)
                         {
                             ReadDataBaseSection(reader);
                             break;

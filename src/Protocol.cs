@@ -1,20 +1,6 @@
-﻿using System;
-using System.Collections.Generic;
-using System.ComponentModel.Design;
-using System.Linq;
-using System.Net.Sockets;
+﻿using System.Net.Sockets;
 using System.Text;
-using System.Threading.Tasks;
-using System.Xml.Linq;
-using static System.Net.Mime.MediaTypeNames;
 
-
-// *n - number of parameters 
-// $n - size of command
-
-// *2\r\n$4\r\nECHO\r\n$3\r\nhey\r\n
-// 2 commands, ECHO size 4, hey size 3
-// split by \r\n
 namespace codecrafters_redis.src
 {
     public class Protocol
@@ -23,10 +9,12 @@ namespace codecrafters_redis.src
         private const char DOLLAR_CHAR = '$';
         private const char PLUS_CHAR = '+';
         private const string SPACE_SING = "\r\n";
-
         private const string PING_RESPONSE = "PONG";
         private const string OK_RESPONSE = "OK";
         private const string NULL_RESPONSE = "-1";
+        private const string PX = "PX";
+
+        private readonly string[] ReplConfSupportedParams = { "capa", "listening-port" };
 
         private enum Commands
         { 
@@ -34,135 +22,221 @@ namespace codecrafters_redis.src
             ECHO,
             GET,
             SET,
-            PX, 
             CONFIG,
             KEYS,
-            INFO
+            INFO,
+            REPLCONF
         }
 
         private readonly string command;
-        private readonly Dictionary<string, string> serverParameters;
+        private readonly Dictionary<string, string> serverSettings;
+
+        public enum HanshakeState
+        {
+            NONE,
+            PING,
+            REPLCONF1,
+            REPLCONF2,
+            PSYNC
+        }
+        public HanshakeState ProtocolHanshakeState { get; set; }
+
+        public Protocol(Dictionary<string, string> parameters)
+        {
+            command = string.Empty;
+            this.serverSettings = parameters;
+        }
 
         public Protocol(string comamnd, Dictionary<string, string> parameters)
         {
             this.command = comamnd;
-            this.serverParameters = parameters;   
+            this.serverSettings = parameters;   
         }
 
         public async Task Write(NetworkStream stream, Dictionary<string, ItemValue> values)
         {
-            ParsedCommand parsedCommand = ParseCommand(command);
-            
-            if (parsedCommand.CommandActions == null)
-                return;
-
-            string action = parsedCommand.CommandActions[0];
-            string response = string.Empty;
-
-            if (action.ToUpper() == Enum.GetName(typeof(Commands), Commands.PING))
-                response = SimpleResponse(PING_RESPONSE);
-            else if (action.ToUpper() == Enum.GetName(typeof(Commands), Commands.ECHO))
+            try
             {
-                if (parsedCommand.CommandActions.Count != 2)
-                    throw new Exception("ECHO comamnd excpects one parameter");
+                ParsedCommand parsedCommand = ParseCommand(command);
+                if (parsedCommand.CommandActions == null || parsedCommand.CommandActions.Count == 0)
+                    return;
 
-                response = BulkResponse(parsedCommand.CommandActions[1]);
+                if (!Enum.TryParse(parsedCommand.CommandActions[0], true, out Commands action))
+                {
+                    string errorMessage = ErrorResponse($"Unknown command: {parsedCommand.CommandActions[0]}");
+                    await SendResponse(stream, errorMessage);
+                    return;
+                }
+
+                string response = action switch
+                {
+                    Commands.PING => HandlePingResponse(),
+                    Commands.ECHO => HandleEchoCommand(parsedCommand),
+                    Commands.GET => HandleGetCommand(parsedCommand, values),
+                    Commands.SET => HandleSetCommand(parsedCommand, values),
+                    Commands.CONFIG => HandleConfigCommand(parsedCommand),
+                    Commands.KEYS => HandleKeysCommand(parsedCommand, values),
+                    Commands.INFO => HandleInfoCommand(parsedCommand),
+                    Commands.REPLCONF => HandleReplConfCommand(parsedCommand),
+                    _ => ErrorResponse($"Unknown command: {action}")
+                };
+
+                await SendResponse(stream, response);
             }
-            else if (action.ToUpper() == Enum.GetName(typeof(Commands), Commands.GET))
+            catch (Exception ex)
             {
-                string key = parsedCommand.CommandActions[1];
+                string errorMessage = ErrorResponse($"Error: {ex.Message}");
+                await SendResponse(stream, errorMessage);
+            }
+        }
 
-                if (values.ContainsKey(key))
+        public async Task HandleMasterSlaveHandshake(NetworkStream stream, string request)
+        {
+            //Recived PONG from master, send two REPLCONF commands from slave to master
+            if (ProtocolHanshakeState == HanshakeState.PING && request == SimpleResponse(PING_RESPONSE))
+            {
+                string slavePort = serverSettings["port"];
+                string repconfCommand = Enum.GetName(typeof(Commands), Commands.REPLCONF) ?? "REPLCONF";
+                string response = ArrayResponse([repconfCommand, "listening-port", slavePort.ToString()]);
+                await SendResponse(stream, response);
+                ProtocolHanshakeState = HanshakeState.REPLCONF1;
+            }
+            else if (ProtocolHanshakeState == HanshakeState.REPLCONF1 && request == SimpleResponse(OK_RESPONSE))
+            {
+                string repconfCommand = Enum.GetName(typeof(Commands), Commands.REPLCONF) ?? "REPLCONF";
+                string response = ArrayResponse([repconfCommand, "capa", "psync2" ]);
+                await SendResponse(stream, response);
+                ProtocolHanshakeState = HanshakeState.REPLCONF2;
+            }
+        }
+
+        private string HandlePingResponse()
+        {
+            return SimpleResponse(PING_RESPONSE);
+        }
+
+        private string HandleEchoCommand(ParsedCommand parsedCommand)
+        {
+            if (parsedCommand.CommandActions.Count != 2)
+                ErrorResponse("ECHO command excpects one parameter");
+
+            return BulkResponse(parsedCommand.CommandActions[1]);
+        }
+
+        private string HandleGetCommand(ParsedCommand parsedCommand, Dictionary<string, ItemValue> values)
+        {
+            if (parsedCommand.CommandActions.Count != 2)
+                return ErrorResponse("GET expects one parameter");
+
+            string key = parsedCommand.CommandActions[1];
+
+            if (values.TryGetValue(key, out var item) && item.IsValid)
+                return BulkResponse(item.Value);
+
+            values.Remove(key); 
+            return NullResponse();
+        }
+
+        private string HandleSetCommand(ParsedCommand parsedCommand, Dictionary<string, ItemValue> values)
+        {
+            if (parsedCommand.CommandActions.Count < 2)
+                ErrorResponse("SET command requiers at least 2 parameters, key and value");
+
+            string key = parsedCommand.CommandActions[1];
+            string value = parsedCommand.CommandActions[2];
+
+            double timeToLive = double.MaxValue;
+
+            if (parsedCommand.CommandActions.Count > 3 && parsedCommand.CommandActions[3].ToUpper() == PX)
+                timeToLive = Convert.ToDouble(parsedCommand.CommandActions[4]);
+
+            values[key] = new ItemValue(value, timeToLive);
+
+            return SimpleResponse(OK_RESPONSE);
+        }
+
+        private string HandleConfigCommand(ParsedCommand parsedCommand)
+        {
+            if (parsedCommand.CommandActions.Count != 3)
+                ErrorResponse("wrong number of parameters for config command");
+
+            if (parsedCommand.CommandActions[1].ToUpper() != Enum.GetName(typeof(Commands), Commands.GET))
+                ErrorResponse("Only get command for CONFIG action is currently supported");
+
+            if (!serverSettings.ContainsKey(parsedCommand.CommandActions[2]))
+                ErrorResponse($"Key {parsedCommand.CommandActions[2]} not found");
+
+            string[] elements = { parsedCommand.CommandActions[2], serverSettings[parsedCommand.CommandActions[2]] };
+            return ArrayResponse(elements);
+        }
+
+        private string HandleKeysCommand(ParsedCommand parsedCommand, Dictionary<string, ItemValue> values)
+        {
+            if (parsedCommand.CommandActions.Count != 2)
+                ErrorResponse("wrong number of arguments for 'keys' command");
+
+            string pattern = parsedCommand.CommandActions[1];
+
+            //select all keys
+            if (pattern == $"{ASTERISK_CHAR}")
+            {
+                List<string> keys = new List<string>();
+                foreach (string key in values.Keys)
                 {
                     if (values[key].IsValid)
-                        response = BulkResponse(values[key].Value);
+                        keys.Add(key);
                     else
-                    {
                         values.Remove(key);
-                        response = NullResponse();
-                    }
                 }
-                else
-                    response = NullResponse();
-            }
-            else if (action.ToUpper() == Enum.GetName(typeof(Commands), Commands.SET))
-            {
-                if (parsedCommand.CommandActions.Count < 2)
-                    throw new Exception("SET command requiers at least 2 parameters, key and value");
 
-                string key = parsedCommand.CommandActions[1];
-                string value = parsedCommand.CommandActions[2];
-
-                double timeToLive = double.MaxValue;
-
-                if (parsedCommand.CommandActions.Count > 3 && parsedCommand.CommandActions[3].ToUpper() == Enum.GetName(typeof(Commands), Commands.PX))
-                    timeToLive = Convert.ToDouble(parsedCommand.CommandActions[4]);
-
-                values[key] = new ItemValue(value, timeToLive);
-
-                response = SimpleResponse(OK_RESPONSE);
-            }
-            else if (action.ToUpper() == Enum.GetName(typeof(Commands), Commands.CONFIG))
-            {
-                if (parsedCommand.CommandActions.Count != 3)
-                    throw new Exception("wrong number of parameters for config command");
-
-                if (parsedCommand.CommandActions[1].ToUpper() == Enum.GetName(typeof(Commands), Commands.GET))
-                {
-                    if (serverParameters.ContainsKey(parsedCommand.CommandActions[2]))
-                    {
-                        string[] elements = { parsedCommand.CommandActions[2], serverParameters[parsedCommand.CommandActions[2]] };
-                        response = ArrayResponse(elements);
-                    }
-                }
-            }
-            else if (action.ToUpper() == Enum.GetName(typeof(Commands), Commands.KEYS))
-            {
-                if (parsedCommand.CommandActions.Count != 2)
-                    throw new Exception("wrong number of arguments for 'keys' command");
-
-                string pattern = parsedCommand.CommandActions[1];
-
-                //select all keys
-                if (pattern == $"{ASTERISK_CHAR}")
-                {
-                    List<string> keys = new List<string>();
-                    foreach (string key in values.Keys)
-                    {
-                        if (values[key].IsValid)
-                            keys.Add(key);
-                        else
-                            values.Remove(key);
-                    }
-
-                    response = ArrayResponse(keys.ToArray());
-                }
-            }
-            else if (action.ToUpper() == Enum.GetName(typeof(Commands), Commands.INFO))
-            {
-                Console.WriteLine("enter info command");
-
-                if(parsedCommand.CommandActions.Count != 2)
-                    throw new Exception("wrong number of arguments for 'info' command");
-
-                string infoType = parsedCommand.CommandActions[1];
-                if (infoType != "replication")
-                    throw new Exception("unsupported type of info command");
-
-                string role = serverParameters.ContainsKey("replicaof") ? "slave" : "master";
-                string info = $"role:{role}";
-
-                string[] items = new string[3];
-                items[0] = info;
-                items[1] = $"master_replid:{GenerateAlphanumericString()}";
-                items[2] = "master_repl_offset:0";
-
-                response = BulkResponse(string.Join(SPACE_SING, items));
+                return ArrayResponse(keys.ToArray());
             }
 
-            byte[] responseData = Encoding.UTF8.GetBytes(response.ToString());
+            return NullResponse();
+        }
+
+        private string HandleInfoCommand(ParsedCommand parsedCommand)
+        {
+            Console.WriteLine("enter info command");
+
+            if (parsedCommand.CommandActions.Count != 2)
+                ErrorResponse("wrong number of arguments for 'info' command");
+
+            string infoType = parsedCommand.CommandActions[1];
+            if (infoType != "replication")
+                ErrorResponse("unsupported type of info command");
+
+            string role = serverSettings.ContainsKey("replicaof") ? "slave" : "master";
+            string info = $"role:{role}";
+
+            string[] items = new string[3];
+            items[0] = info;
+            items[1] = $"master_replid:{GenerateAlphanumericString()}";
+            items[2] = "master_repl_offset:0";
+
+            return BulkResponse(string.Join(SPACE_SING, items));
+        }
+
+        private string HandleReplConfCommand(ParsedCommand parsedCommand)
+        {
+            if (parsedCommand.CommandActions.Count != 3)
+                ErrorResponse("wrong number of arguments for 'replconf' command");
+
+            serverSettings[parsedCommand.CommandActions[1]] = parsedCommand.CommandActions[2];
+
+            return SimpleResponse(OK_RESPONSE);
+        }
+
+        private async Task SendResponse(NetworkStream stream, string response)
+        {
+            byte[] responseData = Encoding.UTF8.GetBytes(response);
             await stream.WriteAsync(responseData, 0, responseData.Length);
-            Console.WriteLine("Response sent: " + response.ToString());
+            Console.WriteLine("Response sent: " + response);
+        }
+
+        private string ErrorResponse(string message)
+        {
+            return $"-ERROR {message}{SPACE_SING}";
         }
 
         private string SimpleResponse(string value)
@@ -266,7 +340,7 @@ namespace codecrafters_redis.src
 
     class ParsedCommand
     {
-        public List<string>? CommandActions { get; set; }
+        public List<string> CommandActions { get; set; } = new List<string>();
         public Dictionary<string, string> CommandParams { get; set; } = new Dictionary<string, string>();
     }
 }
