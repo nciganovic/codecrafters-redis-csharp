@@ -11,6 +11,8 @@ Dictionary<string, string> serverSettings = CollectParameters(args);
 const int defaultPort = 6379;
 int port = serverSettings.ContainsKey("port") && int.TryParse(serverSettings["port"], out _) ? Convert.ToInt32(serverSettings["port"]) : defaultPort;
 
+serverSettings.Add("replid", StringHelper.GenerateAlphanumericString());
+
 TcpListener server = new TcpListener(IPAddress.Any, port);
 server.Start();
 Console.WriteLine($"Server started on port {port}. Waiting for connections...");

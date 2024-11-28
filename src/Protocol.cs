@@ -1,4 +1,5 @@
-﻿using System.Net.Sockets;
+﻿using System.ComponentModel.Design;
+using System.Net.Sockets;
 using System.Text;
 
 namespace codecrafters_redis.src
@@ -25,7 +26,8 @@ namespace codecrafters_redis.src
             CONFIG,
             KEYS,
             INFO,
-            REPLCONF
+            REPLCONF,
+            PSYNC
         }
 
         private readonly string command;
@@ -78,6 +80,7 @@ namespace codecrafters_redis.src
                     Commands.KEYS => HandleKeysCommand(parsedCommand, values),
                     Commands.INFO => HandleInfoCommand(parsedCommand),
                     Commands.REPLCONF => HandleReplConfCommand(parsedCommand),
+                    Commands.PSYNC => HandleReplConfCommand(parsedCommand),
                     _ => ErrorResponse($"Unknown command: {action}")
                 };
 
@@ -104,9 +107,16 @@ namespace codecrafters_redis.src
             else if (ProtocolHanshakeState == HanshakeState.REPLCONF1 && request == SimpleResponse(OK_RESPONSE))
             {
                 string repconfCommand = Enum.GetName(typeof(Commands), Commands.REPLCONF) ?? "REPLCONF";
-                string response = ArrayResponse([repconfCommand, "capa", "psync2" ]);
+                string response = ArrayResponse([repconfCommand, "capa", "psync2"]);
                 await SendResponse(stream, response);
                 ProtocolHanshakeState = HanshakeState.REPLCONF2;
+            }
+            else if (ProtocolHanshakeState == HanshakeState.REPLCONF2 && request == SimpleResponse(OK_RESPONSE))
+            {
+                string repconfCommand = Enum.GetName(typeof(Commands), Commands.PSYNC) ?? "PSYNC";
+                string response = ArrayResponse([repconfCommand, "?", "-1"]);
+                await SendResponse(stream, response);
+                ProtocolHanshakeState = HanshakeState.PSYNC;
             }
         }
 
@@ -211,7 +221,7 @@ namespace codecrafters_redis.src
 
             string[] items = new string[3];
             items[0] = info;
-            items[1] = $"master_replid:{GenerateAlphanumericString()}";
+            items[1] = $"master_replid:{serverSettings["replid"]}";
             items[2] = "master_repl_offset:0";
 
             return BulkResponse(string.Join(SPACE_SING, items));
@@ -225,6 +235,14 @@ namespace codecrafters_redis.src
             serverSettings[parsedCommand.CommandActions[1]] = parsedCommand.CommandActions[2];
 
             return SimpleResponse(OK_RESPONSE);
+        }
+
+        private string HandlePsyncCommand(ParsedCommand parsedCommand)
+        {
+            if (parsedCommand.CommandActions.Count != 3)
+                ErrorResponse("wrong number of arguments for 'psync' command");
+
+            return SimpleResponse($"FULLRESYNC {serverSettings["replid"]} 0");
         }
 
         private async Task SendResponse(NetworkStream stream, string response)
@@ -321,20 +339,6 @@ namespace codecrafters_redis.src
                 commands.RemoveAt(cmd);
 
             return new ParsedCommand { CommandActions = commands, CommandParams = commandParams };
-        }
-
-        static string GenerateAlphanumericString(int length = 40)
-        {
-            const string chars = "abcdefghijklmnopqrstuvwxyz0123456789";
-            var random = new Random();
-            var result = new StringBuilder(length);
-
-            for (int i = 0; i < length; i++)
-            {
-                result.Append(chars[random.Next(chars.Length)]);
-            }
-
-            return result.ToString();
         }
     }
 
