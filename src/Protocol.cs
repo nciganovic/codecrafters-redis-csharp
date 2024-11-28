@@ -80,7 +80,7 @@ namespace codecrafters_redis.src
                     Commands.KEYS => HandleKeysCommand(parsedCommand, values),
                     Commands.INFO => HandleInfoCommand(parsedCommand),
                     Commands.REPLCONF => HandleReplConfCommand(parsedCommand),
-                    Commands.PSYNC => HandleReplConfCommand(parsedCommand),
+                    Commands.PSYNC => HandlePsyncCommand(parsedCommand),
                     _ => ErrorResponse($"Unknown command: {action}")
                 };
 
