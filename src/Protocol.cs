@@ -39,7 +39,8 @@ namespace codecrafters_redis.src
             PING,
             REPLCONF1,
             REPLCONF2,
-            PSYNC
+            PSYNC,
+            FULLRESYNC
         }
         public HanshakeState ProtocolHanshakeState { get; set; }
 
@@ -85,6 +86,14 @@ namespace codecrafters_redis.src
                 };
 
                 await SendResponse(stream, response);
+
+                if (action == Commands.PSYNC)
+                {
+                    string emptyRdbBase64 = "UkVESVMwMDEx+glyZWRpcy12ZXIFNy4yLjD6CnJlZGlzLWJpdHPAQPoFY3RpbWXCbQi8ZfoIdXNlZC1tZW3CsMQQAPoIYW9mLWJhc2XAAP/wbjv+wP9aog==";
+                    byte[] binaryData = Convert.FromBase64String(emptyRdbBase64);
+                    byte[] rdbResynchronizationFileMsg = Encoding.ASCII.GetBytes($"${binaryData.Length}\r\n").Concat(binaryData).ToArray();
+                    stream.Write(rdbResynchronizationFileMsg);
+                }
             }
             catch (Exception ex)
             {
@@ -118,6 +127,18 @@ namespace codecrafters_redis.src
                 await SendResponse(stream, response);
                 ProtocolHanshakeState = HanshakeState.PSYNC;
             }
+            else if (ProtocolHanshakeState == HanshakeState.PSYNC)
+            {
+                string[] parameters = request.Split(' ');
+                serverSettings["master_replid"] = parameters[1];
+                ProtocolHanshakeState = HanshakeState.FULLRESYNC;
+            }
+            else if (ProtocolHanshakeState == HanshakeState.FULLRESYNC)
+            { 
+                
+            }
+            else
+                ErrorResponse("synchronization failed between master and slave");
         }
 
         private string HandlePingResponse()
