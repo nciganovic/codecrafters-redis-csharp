@@ -1,6 +1,9 @@
-﻿using System.ComponentModel.Design;
+﻿using System;
+using System.ComponentModel.Design;
+using System.IO;
 using System.Net.Sockets;
 using System.Text;
+using System.Text.RegularExpressions;
 
 namespace codecrafters_redis.src
 {
@@ -16,6 +19,8 @@ namespace codecrafters_redis.src
         private const string PX = "PX";
 
         private readonly string[] ReplConfSupportedParams = { "capa", "listening-port" };
+          
+        List<NetworkStream> slaveStreams = new List<NetworkStream>();
 
         private enum Commands
         { 
@@ -30,7 +35,6 @@ namespace codecrafters_redis.src
             PSYNC
         }
 
-        private readonly string command;
         private readonly Dictionary<string, string> serverSettings;
 
         public enum HanshakeState
@@ -40,27 +44,24 @@ namespace codecrafters_redis.src
             REPLCONF1,
             REPLCONF2,
             PSYNC,
-            FULLRESYNC
+            FULLRESYNC,
+            COMPLETED
         }
-        public HanshakeState ProtocolHanshakeState { get; set; }
+        public HanshakeState ProtocolHandshakeState { get; set; }
 
-        public Protocol(Dictionary<string, string> parameters)
+        public Protocol(Dictionary<string, string> serverSettings)
         {
-            command = string.Empty;
-            this.serverSettings = parameters;
+            this.serverSettings = serverSettings;
         }
 
-        public Protocol(string comamnd, Dictionary<string, string> parameters)
-        {
-            this.command = comamnd;
-            this.serverSettings = parameters;   
-        }
-
-        public async Task Write(NetworkStream stream, Dictionary<string, ItemValue> values)
+        public async Task Write(NetworkStream stream, string request, Dictionary<string, ItemValue> values)
         {
             try
             {
-                ParsedCommand parsedCommand = ParseCommand(command);
+                if (request.Length > 0 && request[0] == PLUS_CHAR)
+                    return;
+
+                ParsedCommand parsedCommand = ParseCommand(request);
                 if (parsedCommand.CommandActions == null || parsedCommand.CommandActions.Count == 0)
                     return;
 
@@ -71,7 +72,7 @@ namespace codecrafters_redis.src
                     return;
                 }
 
-                string response = action switch
+                string response =  action switch 
                 {
                     Commands.PING => HandlePingResponse(),
                     Commands.ECHO => HandleEchoCommand(parsedCommand),
@@ -87,12 +88,22 @@ namespace codecrafters_redis.src
 
                 await SendResponse(stream, response);
 
+                if (action == Commands.SET)
+                { 
+                    foreach (NetworkStream slaveStream in slaveStreams)
+                    {
+                        await SendResponse(slaveStream, ArrayResponse(parsedCommand.CommandActions.ToArray()));
+                    }
+                }
+
                 if (action == Commands.PSYNC)
                 {
+                    //Send empty RDB to slave
                     string emptyRdbBase64 = "UkVESVMwMDEx+glyZWRpcy12ZXIFNy4yLjD6CnJlZGlzLWJpdHPAQPoFY3RpbWXCbQi8ZfoIdXNlZC1tZW3CsMQQAPoIYW9mLWJhc2XAAP/wbjv+wP9aog==";
                     byte[] binaryData = Convert.FromBase64String(emptyRdbBase64);
                     byte[] rdbResynchronizationFileMsg = Encoding.ASCII.GetBytes($"${binaryData.Length}\r\n").Concat(binaryData).ToArray();
-                    stream.Write(rdbResynchronizationFileMsg);
+                    await stream.WriteAsync(rdbResynchronizationFileMsg);
+                    slaveStreams.Add(stream);    
                 }
             }
             catch (Exception ex)
@@ -102,43 +113,83 @@ namespace codecrafters_redis.src
             }
         }
 
-        public async Task HandleMasterSlaveHandshake(NetworkStream stream, string request)
+        public async Task HandleMasterSlaveHandshake(NetworkStream stream, string request, Dictionary<string, ItemValue> values)
         {
-            //Recived PONG from master, send two REPLCONF commands from slave to master
-            if (ProtocolHanshakeState == HanshakeState.PING && request == SimpleResponse(PING_RESPONSE))
+            string response = ProtocolHandshakeState switch
             {
-                string slavePort = serverSettings["port"];
-                string repconfCommand = Enum.GetName(typeof(Commands), Commands.REPLCONF) ?? "REPLCONF";
-                string response = ArrayResponse([repconfCommand, "listening-port", slavePort.ToString()]);
+                HanshakeState.PING => CreateReplconf1Response(request),
+                HanshakeState.REPLCONF1 => CreateReplconf2Response(request),
+                HanshakeState.REPLCONF2 => CreatePsyncResponse(request),
+                HanshakeState.PSYNC => HandleFullresyncRequest(request),
+                HanshakeState.FULLRESYNC => CompleteHanshake(request),
+                HanshakeState.COMPLETED => await HandleWriteAsSlave(stream, request, values),
+                _ => ErrorResponse($"Request cannot be handled in state: {ProtocolHandshakeState}")
+            };
+
+            if(response != string.Empty)
                 await SendResponse(stream, response);
-                ProtocolHanshakeState = HanshakeState.REPLCONF1;
-            }
-            else if (ProtocolHanshakeState == HanshakeState.REPLCONF1 && request == SimpleResponse(OK_RESPONSE))
-            {
-                string repconfCommand = Enum.GetName(typeof(Commands), Commands.REPLCONF) ?? "REPLCONF";
-                string response = ArrayResponse([repconfCommand, "capa", "psync2"]);
-                await SendResponse(stream, response);
-                ProtocolHanshakeState = HanshakeState.REPLCONF2;
-            }
-            else if (ProtocolHanshakeState == HanshakeState.REPLCONF2 && request == SimpleResponse(OK_RESPONSE))
-            {
-                string repconfCommand = Enum.GetName(typeof(Commands), Commands.PSYNC) ?? "PSYNC";
-                string response = ArrayResponse([repconfCommand, "?", "-1"]);
-                await SendResponse(stream, response);
-                ProtocolHanshakeState = HanshakeState.PSYNC;
-            }
-            else if (ProtocolHanshakeState == HanshakeState.PSYNC)
-            {
-                string[] parameters = request.Split(' ');
-                serverSettings["master_replid"] = parameters[1];
-                ProtocolHanshakeState = HanshakeState.FULLRESYNC;
-            }
-            else if (ProtocolHanshakeState == HanshakeState.FULLRESYNC)
-            { 
-                
-            }
-            else
-                ErrorResponse("synchronization failed between master and slave");
+        }
+
+        public async Task SendPingRequest(NetworkStream stream)
+        {
+            string request = ArrayResponse([Enum.GetName(typeof(Commands), Commands.PING) ?? "PING"]);
+            await SendResponse(stream, request);
+        }
+
+        private string CreateReplconf1Response(string request)
+        {
+            if (request != SimpleResponse(PING_RESPONSE))
+                ErrorResponse("Recived: " + request + ", expected: " + SimpleResponse(PING_RESPONSE));
+
+            string slavePort = serverSettings["port"];
+            string repconfCommand = Enum.GetName(typeof(Commands), Commands.REPLCONF) ?? "REPLCONF";
+            ProtocolHandshakeState = HanshakeState.REPLCONF1;
+            return ArrayResponse([repconfCommand, "listening-port", slavePort.ToString()]);
+        }
+
+        private string CreateReplconf2Response(string request)
+        {
+            if (request != SimpleResponse(OK_RESPONSE))
+                ErrorResponse("Recived: " + request + ", expected: " + SimpleResponse(OK_RESPONSE));
+
+            string repconfCommand = Enum.GetName(typeof(Commands), Commands.REPLCONF) ?? "REPLCONF";
+            ProtocolHandshakeState = HanshakeState.REPLCONF2;
+            return ArrayResponse([repconfCommand, "capa", "psync2"]);
+        }
+
+        private string CreatePsyncResponse(string request)
+        {
+            if (request != SimpleResponse(OK_RESPONSE))
+                ErrorResponse("Recived: " + request + ", expected: " + SimpleResponse(OK_RESPONSE));
+
+            string repconfCommand = Enum.GetName(typeof(Commands), Commands.PSYNC) ?? "PSYNC";
+            ProtocolHandshakeState = HanshakeState.PSYNC;
+            return ArrayResponse([repconfCommand, "?", "-1"]);
+        }
+
+        private string HandleFullresyncRequest(string request)
+        {
+            if (!isFullresyncResponseValid(request))
+                ErrorResponse($"Response {request} is not valid {Enum.GetName(typeof(HanshakeState), HanshakeState.FULLRESYNC)} pattern");
+
+            string[] parameters = request.Split(' ');
+            serverSettings["master_server_id"] = parameters[1];
+            ProtocolHandshakeState = HanshakeState.FULLRESYNC;
+            return string.Empty;
+        }
+
+        private string CompleteHanshake(string request)
+        {
+            //TODO write logic to save rdb file on slave
+            Console.WriteLine("Handshake completed with " + serverSettings["master_server_id"]);
+            ProtocolHandshakeState = HanshakeState.COMPLETED;
+            return string.Empty;
+        }
+
+        private async Task<string> HandleWriteAsSlave(NetworkStream stream, string request, Dictionary<string, ItemValue> values)
+        {
+            await Write(stream, request, values);
+            return string.Empty;
         }
 
         private string HandlePingResponse()
@@ -242,7 +293,7 @@ namespace codecrafters_redis.src
 
             string[] items = new string[3];
             items[0] = info;
-            items[1] = $"master_replid:{serverSettings["replid"]}";
+            items[1] = $"master_replid:{serverSettings["server_id"]}";
             items[2] = "master_repl_offset:0";
 
             return BulkResponse(string.Join(SPACE_SING, items));
@@ -263,7 +314,7 @@ namespace codecrafters_redis.src
             if (parsedCommand.CommandActions.Count != 3)
                 ErrorResponse("wrong number of arguments for 'psync' command");
 
-            return SimpleResponse($"FULLRESYNC {serverSettings["replid"]} 0");
+            return SimpleResponse($"{Enum.GetName(typeof(HanshakeState), HanshakeState.FULLRESYNC)} {serverSettings["server_id"]} 0");
         }
 
         private async Task SendResponse(NetworkStream stream, string response)
@@ -360,6 +411,13 @@ namespace codecrafters_redis.src
                 commands.RemoveAt(cmd);
 
             return new ParsedCommand { CommandActions = commands, CommandParams = commandParams };
+        }
+
+        private bool isFullresyncResponseValid(string value)
+        {
+            string pattern = @"^FULLRESYNC [a-z0-9]{40} 0$";
+            Regex regex = new Regex(pattern);
+            return regex.IsMatch(value);
         }
     }
 

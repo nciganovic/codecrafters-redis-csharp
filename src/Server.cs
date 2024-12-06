@@ -10,12 +10,13 @@ Dictionary<string, ItemValue> values = new Dictionary<string, ItemValue>();
 Dictionary<string, string> serverSettings = CollectParameters(args);
 const int defaultPort = 6379;
 int port = serverSettings.ContainsKey("port") && int.TryParse(serverSettings["port"], out _) ? Convert.ToInt32(serverSettings["port"]) : defaultPort;
+string serverId = StringHelper.GenerateAlphanumericString();
 
-serverSettings.Add("replid", StringHelper.GenerateAlphanumericString());
+serverSettings.Add("server_id", serverId);
 
 TcpListener server = new TcpListener(IPAddress.Any, port);
 server.Start();
-Console.WriteLine($"Server started on port {port}. Waiting for connections...");
+Console.WriteLine($"Server {serverId} started on port {port}. Waiting for connections...");
 
 if (serverSettings.ContainsKey("dir") && serverSettings.ContainsKey("dbfilename"))
 {
@@ -27,6 +28,8 @@ if (serverSettings.ContainsKey("dir") && serverSettings.ContainsKey("dbfilename"
         values = reader.rdsDatabse;
     }
 }
+
+Protocol protocol = new Protocol(serverSettings);
 
 if (serverSettings.ContainsKey("replicaof"))
 {
@@ -42,30 +45,26 @@ if (serverSettings.ContainsKey("replicaof"))
     TcpClient masterClient = new TcpClient();
     masterClient.Connect(masterHost, masterPortValue);
     Console.WriteLine("Connected to master:" + masterHost + " at " + masterPortValue);
-    _ = HandleMasterServerAsync(masterClient, serverSettings);
+    _ = HandleMasterServerAsync(masterClient, values, protocol);
 }
 
 while (true)
 {   
     TcpClient client = await server.AcceptTcpClientAsync();
     Console.WriteLine("Client connected.");
-    _ = HandleClientAsync(client, values, serverSettings);
+    _ = HandleClientAsync(client, values, protocol);
 }
 
-static async Task HandleMasterServerAsync(TcpClient client, Dictionary<string, string> serverParameters)
+static async Task HandleMasterServerAsync(TcpClient client, Dictionary<string, ItemValue> values, Protocol protocol)
 {
     using (NetworkStream stream = client.GetStream())
     {
-        string message = "*1\r\n$4\r\nPING\r\n";
-        byte[] data = Encoding.UTF8.GetBytes(message);
-        stream.Write(data, 0, data.Length);
-        Console.WriteLine($"Sent: {message}");
+        await protocol.SendPingRequest(stream);
 
         byte[] buffer = new byte[1024];
         bool connected = true;
 
-        Protocol p = new Protocol(serverParameters);
-        p.ProtocolHanshakeState = Protocol.HanshakeState.PING;
+        protocol.ProtocolHandshakeState = Protocol.HanshakeState.PING;
 
         while (connected)
         {
@@ -81,14 +80,17 @@ static async Task HandleMasterServerAsync(TcpClient client, Dictionary<string, s
             string request = Encoding.UTF8.GetString(buffer, 0, bytesRead);
             Console.WriteLine($"Received: {request}");
 
+            if (request.IndexOf("ERROR") != -1)
+                break;
+
             // Process the data here if necessary, and prepare a response
-            await p.HandleMasterSlaveHandshake(stream, request);
+            await protocol.HandleMasterSlaveHandshake(stream, request, values);
 
         }
     }
 }
 
-static async Task HandleClientAsync(TcpClient client, Dictionary<string, ItemValue> values, Dictionary<string, string> serverParameters)
+static async Task HandleClientAsync(TcpClient client, Dictionary<string, ItemValue> values, Protocol protocol)
 {
     using (NetworkStream stream = client.GetStream())
     {
@@ -109,9 +111,11 @@ static async Task HandleClientAsync(TcpClient client, Dictionary<string, ItemVal
             string request = Encoding.UTF8.GetString(buffer, 0, bytesRead);
             Console.WriteLine($"Received: {request}");
 
+            if (request.IndexOf("ERROR") != -1)
+                break;
+
             // Process the data here if necessary, and prepare a response
-            Protocol p = new Protocol(request, serverParameters);
-            await p.Write(stream, values);
+            await protocol.Write(stream, request, values);
         }
     }
 
