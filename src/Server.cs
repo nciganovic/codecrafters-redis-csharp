@@ -3,6 +3,7 @@ using System;
 using System.Net;
 using System.Net.Sockets;
 using System.Text;
+using System.Text.RegularExpressions;
 
 // echo -ne "*2\r\n$4\r\nKEYS\r\n$1\r\n*\r\n" | nc localhost 6380
 
@@ -78,7 +79,10 @@ static async Task HandleMasterServerAsync(TcpClient client, Dictionary<string, I
             }
 
             string request = Encoding.UTF8.GetString(buffer, 0, bytesRead);
-            Console.WriteLine($"Received: {request}");
+            //string testString = "*3\\r\\n\\$3\\r\\nSET\\r\\n\\$3\\r\\nfoo\\r\\n\\$3\\r\\n123\\r\\n\\*3\\r\\n\\$3\\r\\nSET\\r\\n\\$3\\r\\nbar\\r\\n\\$3\\r\\n456\\r\\n\\*3\\r\\n\\$3\\r\\nSET\\r\\n\\$3\\r\\nbaz\\r\\n\\$3\\r\\n789\\r\\n";
+            //if (request.IndexOf("$88") == 0)
+                //request += testString;
+            Console.WriteLine($"Slave Received: {Regex.Escape(request)}");
 
             if (request.IndexOf("ERROR") != -1)
                 break;
@@ -109,7 +113,7 @@ static async Task HandleClientAsync(TcpClient client, Dictionary<string, ItemVal
             }
 
             string request = Encoding.UTF8.GetString(buffer, 0, bytesRead);
-            Console.WriteLine($"Received: {request}");
+            Console.WriteLine($"Master Received: {Regex.Escape(request)}");
 
             if (request.IndexOf("ERROR") != -1)
                 break;

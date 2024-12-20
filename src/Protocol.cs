@@ -1,6 +1,7 @@
 ﻿using System;
 using System.ComponentModel.Design;
 using System.IO;
+using System.Net;
 using System.Net.Sockets;
 using System.Text;
 using System.Text.RegularExpressions;
@@ -49,6 +50,8 @@ namespace codecrafters_redis.src
         }
         public HanshakeState ProtocolHandshakeState { get; set; }
 
+        public bool IsMasterInstance => !serverSettings.ContainsKey("replicaof");
+
         public Protocol(Dictionary<string, string> serverSettings)
         {
             this.serverSettings = serverSettings;
@@ -58,53 +61,59 @@ namespace codecrafters_redis.src
         {
             try
             {
-                if (request.Length > 0 && request[0] == PLUS_CHAR)
+                if (request.Length > 0 && (request[0] == PLUS_CHAR || request[0] == DOLLAR_CHAR))
                     return;
 
-                ParsedCommand parsedCommand = ParseCommand(request);
-                if (parsedCommand.CommandActions == null || parsedCommand.CommandActions.Count == 0)
-                    return;
-
-                if (!Enum.TryParse(parsedCommand.CommandActions[0], true, out Commands action))
+                List<Command> parsedCommands = ParseRequest(request);
+                foreach (var parsedCommand in parsedCommands)
                 {
-                    string errorMessage = ErrorResponse($"Unknown command: {parsedCommand.CommandActions[0]}");
-                    await SendResponse(stream, errorMessage);
-                    return;
-                }
+                    if (parsedCommand.CommandActions == null || parsedCommand.CommandActions.Count == 0)
+                        return;
 
-                string response =  action switch 
-                {
-                    Commands.PING => HandlePingResponse(),
-                    Commands.ECHO => HandleEchoCommand(parsedCommand),
-                    Commands.GET => HandleGetCommand(parsedCommand, values),
-                    Commands.SET => HandleSetCommand(parsedCommand, values),
-                    Commands.CONFIG => HandleConfigCommand(parsedCommand),
-                    Commands.KEYS => HandleKeysCommand(parsedCommand, values),
-                    Commands.INFO => HandleInfoCommand(parsedCommand),
-                    Commands.REPLCONF => HandleReplConfCommand(parsedCommand),
-                    Commands.PSYNC => HandlePsyncCommand(parsedCommand),
-                    _ => ErrorResponse($"Unknown command: {action}")
-                };
-
-                await SendResponse(stream, response);
-
-                if (action == Commands.SET)
-                { 
-                    foreach (NetworkStream slaveStream in slaveStreams)
+                    if (!Enum.TryParse(parsedCommand.CommandActions[0], true, out Commands action))
                     {
-                        await SendResponse(slaveStream, ArrayResponse(parsedCommand.CommandActions.ToArray()));
+                        string errorMessage = ErrorResponse($"Unknown command: {parsedCommand.CommandActions[0]}");
+                        await SendResponse(stream, errorMessage);
+                        return;
+                    }
+
+                    string response = action switch
+                    {
+                        Commands.PING => HandlePingResponse(),
+                        Commands.ECHO => HandleEchoCommand(parsedCommand),
+                        Commands.GET => HandleGetCommand(parsedCommand, values),
+                        Commands.SET => HandleSetCommand(parsedCommand, values),
+                        Commands.CONFIG => HandleConfigCommand(parsedCommand),
+                        Commands.KEYS => HandleKeysCommand(parsedCommand, values),
+                        Commands.INFO => HandleInfoCommand(parsedCommand),
+                        Commands.REPLCONF => HandleReplConfCommand(parsedCommand),
+                        Commands.PSYNC => HandlePsyncCommand(parsedCommand),
+                        _ => ErrorResponse($"Unknown command: {action}")
+                    };
+
+                    if (response != string.Empty)
+                        await SendResponse(stream, response);
+
+                    if (action == Commands.SET || action == Commands.GET)
+                    {
+                        foreach (NetworkStream slaveStream in slaveStreams)
+                        {
+                            await SendResponse(slaveStream, ArrayResponse(parsedCommand.CommandActions.ToArray()));
+                        }
+                    }
+
+                    if (action == Commands.PSYNC)
+                    {
+                        //Send empty RDB to slave
+                        string emptyRdbBase64 = "UkVESVMwMDEx+glyZWRpcy12ZXIFNy4yLjD6CnJlZGlzLWJpdHPAQPoFY3RpbWXCbQi8ZfoIdXNlZC1tZW3CsMQQAPoIYW9mLWJhc2XAAP/wbjv+wP9aog==";
+                        byte[] binaryData = Convert.FromBase64String(emptyRdbBase64);
+                        byte[] rdbResynchronizationFileMsg = Encoding.ASCII.GetBytes($"${binaryData.Length}\r\n").Concat(binaryData).ToArray();
+                        await stream.WriteAsync(rdbResynchronizationFileMsg);
+                        Console.WriteLine("Master sent empty rdb file.");
+                        slaveStreams.Add(stream);
                     }
                 }
-
-                if (action == Commands.PSYNC)
-                {
-                    //Send empty RDB to slave
-                    string emptyRdbBase64 = "UkVESVMwMDEx+glyZWRpcy12ZXIFNy4yLjD6CnJlZGlzLWJpdHPAQPoFY3RpbWXCbQi8ZfoIdXNlZC1tZW3CsMQQAPoIYW9mLWJhc2XAAP/wbjv+wP9aog==";
-                    byte[] binaryData = Convert.FromBase64String(emptyRdbBase64);
-                    byte[] rdbResynchronizationFileMsg = Encoding.ASCII.GetBytes($"${binaryData.Length}\r\n").Concat(binaryData).ToArray();
-                    await stream.WriteAsync(rdbResynchronizationFileMsg);
-                    slaveStreams.Add(stream);    
-                }
+                
             }
             catch (Exception ex)
             {
@@ -121,12 +130,21 @@ namespace codecrafters_redis.src
                 HanshakeState.REPLCONF1 => CreateReplconf2Response(request),
                 HanshakeState.REPLCONF2 => CreatePsyncResponse(request),
                 HanshakeState.PSYNC => HandleFullresyncRequest(request),
-                HanshakeState.FULLRESYNC => CompleteHanshake(request),
-                HanshakeState.COMPLETED => await HandleWriteAsSlave(stream, request, values),
-                _ => ErrorResponse($"Request cannot be handled in state: {ProtocolHandshakeState}")
+                _ => string.Empty
             };
 
-            if(response != string.Empty)
+            //When FULLRESYNC first request will be FULLRESYNC sd23l754emvgmz53hk5dwuo7m5oe6cx4tzvc0cv2 0
+            //Second will be \$88\r\nREDIS0011?\tredis-ver♣7\.2\.0?\nredis-bits?@?♣ctime??eused-mem°?►aof-base???n;???Z? rdb file
+            //TODO on FULLRESYNC state handle saving rdb file that is sent from master
+
+            int index = request.IndexOf(ASTERISK_CHAR);
+            if(index > 0)
+                request = request.Substring(index);
+
+            if (request[0] == ASTERISK_CHAR)
+                await HandleWriteAsSlave(stream, request, values);
+
+            if (response != string.Empty)
                 await SendResponse(stream, response);
         }
 
@@ -175,14 +193,7 @@ namespace codecrafters_redis.src
             string[] parameters = request.Split(' ');
             serverSettings["master_server_id"] = parameters[1];
             ProtocolHandshakeState = HanshakeState.FULLRESYNC;
-            return string.Empty;
-        }
-
-        private string CompleteHanshake(string request)
-        {
-            //TODO write logic to save rdb file on slave
             Console.WriteLine("Handshake completed with " + serverSettings["master_server_id"]);
-            ProtocolHandshakeState = HanshakeState.COMPLETED;
             return string.Empty;
         }
 
@@ -197,7 +208,7 @@ namespace codecrafters_redis.src
             return SimpleResponse(PING_RESPONSE);
         }
 
-        private string HandleEchoCommand(ParsedCommand parsedCommand)
+        private string HandleEchoCommand(Command parsedCommand)
         {
             if (parsedCommand.CommandActions.Count != 2)
                 ErrorResponse("ECHO command excpects one parameter");
@@ -205,7 +216,7 @@ namespace codecrafters_redis.src
             return BulkResponse(parsedCommand.CommandActions[1]);
         }
 
-        private string HandleGetCommand(ParsedCommand parsedCommand, Dictionary<string, ItemValue> values)
+        private string HandleGetCommand(Command parsedCommand, Dictionary<string, ItemValue> values)
         {
             if (parsedCommand.CommandActions.Count != 2)
                 return ErrorResponse("GET expects one parameter");
@@ -219,7 +230,7 @@ namespace codecrafters_redis.src
             return NullResponse();
         }
 
-        private string HandleSetCommand(ParsedCommand parsedCommand, Dictionary<string, ItemValue> values)
+        private string HandleSetCommand(Command parsedCommand, Dictionary<string, ItemValue> values)
         {
             if (parsedCommand.CommandActions.Count < 2)
                 ErrorResponse("SET command requiers at least 2 parameters, key and value");
@@ -234,10 +245,11 @@ namespace codecrafters_redis.src
 
             values[key] = new ItemValue(value, timeToLive);
 
-            return SimpleResponse(OK_RESPONSE);
+
+            return IsMasterInstance ? SimpleResponse(OK_RESPONSE) : string.Empty;
         }
 
-        private string HandleConfigCommand(ParsedCommand parsedCommand)
+        private string HandleConfigCommand(Command parsedCommand)
         {
             if (parsedCommand.CommandActions.Count != 3)
                 ErrorResponse("wrong number of parameters for config command");
@@ -252,7 +264,7 @@ namespace codecrafters_redis.src
             return ArrayResponse(elements);
         }
 
-        private string HandleKeysCommand(ParsedCommand parsedCommand, Dictionary<string, ItemValue> values)
+        private string HandleKeysCommand(Command parsedCommand, Dictionary<string, ItemValue> values)
         {
             if (parsedCommand.CommandActions.Count != 2)
                 ErrorResponse("wrong number of arguments for 'keys' command");
@@ -277,7 +289,7 @@ namespace codecrafters_redis.src
             return NullResponse();
         }
 
-        private string HandleInfoCommand(ParsedCommand parsedCommand)
+        private string HandleInfoCommand(Command parsedCommand)
         {
             Console.WriteLine("enter info command");
 
@@ -288,7 +300,7 @@ namespace codecrafters_redis.src
             if (infoType != "replication")
                 ErrorResponse("unsupported type of info command");
 
-            string role = serverSettings.ContainsKey("replicaof") ? "slave" : "master";
+            string role = IsMasterInstance ? "master" : "slave";
             string info = $"role:{role}";
 
             string[] items = new string[3];
@@ -299,7 +311,7 @@ namespace codecrafters_redis.src
             return BulkResponse(string.Join(SPACE_SING, items));
         }
 
-        private string HandleReplConfCommand(ParsedCommand parsedCommand)
+        private string HandleReplConfCommand(Command parsedCommand)
         {
             if (parsedCommand.CommandActions.Count != 3)
                 ErrorResponse("wrong number of arguments for 'replconf' command");
@@ -309,7 +321,7 @@ namespace codecrafters_redis.src
             return SimpleResponse(OK_RESPONSE);
         }
 
-        private string HandlePsyncCommand(ParsedCommand parsedCommand)
+        private string HandlePsyncCommand(Command parsedCommand)
         {
             if (parsedCommand.CommandActions.Count != 3)
                 ErrorResponse("wrong number of arguments for 'psync' command");
@@ -371,46 +383,50 @@ namespace codecrafters_redis.src
             return response;
         }
 
-        private ParsedCommand ParseCommand(string command)
+        private List<Command> ParseRequest(string request)
         {
-            List<string> commands = command.Split(SPACE_SING).ToList();
-            
-            if (commands.Count == 0)
-                throw new ArgumentException($"Invalid command, no \\r\\n found");
+            string[] requestList = Regex.Split(request, @"\*\d+");
 
-            if (commands[0].IndexOf(ASTERISK_CHAR) == -1)
+            if(requestList.Length == 0)
                 throw new ArgumentException($"{ASTERISK_CHAR} required as first parameter");
 
-            int paramCount = Convert.ToInt32(commands[0].Split(ASTERISK_CHAR)[1]);
+            List<Command> commands = new List<Command>();
 
-            if (paramCount == -1)
-                return new ParsedCommand();
-
-            if (paramCount == 0)
-                return new ParsedCommand();
-
-            commands.RemoveAt(0);
-            commands.RemoveAt(commands.Count - 1);
-            commands.RemoveAll(x => x.IndexOf('$') != -1);
-            commands.RemoveAll(x => x == string.Empty);
-
-            List<int> commandParamsToRemove = new List<int>();
-
-            Dictionary<string, string> commandParams = new Dictionary<string, string>();
-            for (int i = 0; i < commands.Count - 1; i++)
+            foreach (string command in requestList)
             {
-                if (commands[i][0] == '-')
-                { 
-                    commandParams.Add(commands[i], commands[i + 1]);
-                    commandParamsToRemove.Insert(0, i);
-                    commandParamsToRemove.Insert(0, i + 1);
+                if (command.Length == 0)
+                    continue;
+
+                List<string> commandParams = command.Split(SPACE_SING).ToList();
+            
+                if (commandParams.Count == 0)
+                    throw new ArgumentException($"Invalid command, no {SPACE_SING} found");
+
+                commandParams.RemoveAt(0);
+                commandParams.RemoveAt(commandParams.Count - 1);
+                commandParams.RemoveAll(x => x.IndexOf('$') != -1);
+                commandParams.RemoveAll(x => x == string.Empty);
+
+                List<int> commandParamsToRemove = new List<int>();
+
+                Dictionary<string, string> commandDict = new Dictionary<string, string>();
+                for (int i = 0; i < commandParams.Count - 1; i++)
+                {
+                    if (commandParams[i][0] == '-')
+                    {
+                        commandDict.Add(commandParams[i], commandParams[i + 1]);
+                        commandParamsToRemove.Insert(0, i);
+                        commandParamsToRemove.Insert(0, i + 1);
+                    }
                 }
+
+                foreach(int cmd in commandParamsToRemove)
+                    commandParams.RemoveAt(cmd);
+
+                commands.Add(new Command { CommandActions = commandParams, CommandParams = commandDict });
             }
 
-            foreach(int cmd in commandParamsToRemove)
-                commands.RemoveAt(cmd);
-
-            return new ParsedCommand { CommandActions = commands, CommandParams = commandParams };
+            return commands;
         }
 
         private bool isFullresyncResponseValid(string value)
@@ -421,7 +437,7 @@ namespace codecrafters_redis.src
         }
     }
 
-    class ParsedCommand
+    class Command
     {
         public List<string> CommandActions { get; set; } = new List<string>();
         public Dictionary<string, string> CommandParams { get; set; } = new Dictionary<string, string>();
