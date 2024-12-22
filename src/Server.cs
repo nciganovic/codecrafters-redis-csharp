@@ -19,6 +19,7 @@ TcpListener server = new TcpListener(IPAddress.Any, port);
 server.Start();
 Console.WriteLine($"Server {serverId} started on port {port}. Waiting for connections...");
 
+
 if (serverSettings.ContainsKey("dir") && serverSettings.ContainsKey("dbfilename"))
 {
     string dir = $"{serverSettings["dir"]}/{serverSettings["dbfilename"]}";

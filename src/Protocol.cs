@@ -94,7 +94,7 @@ namespace codecrafters_redis.src
                     if (response != string.Empty)
                         await SendResponse(stream, response);
 
-                    if (action == Commands.SET || action == Commands.GET)
+                    if (action == Commands.SET || action == Commands.GET || IsReplconfGetack(parsedCommand.CommandActions))
                     {
                         foreach (NetworkStream slaveStream in slaveStreams)
                         {
@@ -122,6 +122,11 @@ namespace codecrafters_redis.src
             }
         }
 
+        private bool IsReplconfGetack(List<string> commandActions)
+        { 
+            return commandActions.Count == 3 && commandActions[0] == "REPLCONF" && commandActions[1] == "GETACK" && commandActions[2] == "*";
+        }
+
         public async Task HandleMasterSlaveHandshake(NetworkStream stream, string request, Dictionary<string, ItemValue> values)
         {
             string response = ProtocolHandshakeState switch
@@ -137,12 +142,18 @@ namespace codecrafters_redis.src
             //Second will be \$88\r\nREDIS0011?\tredis-ver♣7\.2\.0?\nredis-bits?@?♣ctime??eused-mem°?►aof-base???n;???Z? rdb file
             //TODO on FULLRESYNC state handle saving rdb file that is sent from master
 
-            int index = request.IndexOf(ASTERISK_CHAR);
-            if(index > 0)
-                request = request.Substring(index);
+            if (ProtocolHandshakeState == HanshakeState.FULLRESYNC)
+            { 
+                int index = request.IndexOf(ASTERISK_CHAR);
+                if(index > 0)
+                    request = request.Substring(index);
 
-            if (request[0] == ASTERISK_CHAR)
-                await HandleWriteAsSlave(stream, request, values);
+                if (request[0] == ASTERISK_CHAR)
+                    await HandleWriteAsSlave(stream, request, values);
+
+                if (request == "*3\r\n$8\r\nREPLCONF\r\n$6\r\nGETACK\r\n$1\r\n*\r\n")
+                   response = ArrayResponse(["REPLCONF", "ACK", "0"]);
+            }
 
             if (response != string.Empty)
                 await SendResponse(stream, response);
@@ -315,6 +326,9 @@ namespace codecrafters_redis.src
         {
             if (parsedCommand.CommandActions.Count != 3)
                 ErrorResponse("wrong number of arguments for 'replconf' command");
+
+            if (parsedCommand.CommandActions[1] == "GETACK" || parsedCommand.CommandActions[1] == "ACK")
+                return string.Empty;
 
             serverSettings[parsedCommand.CommandActions[1]] = parsedCommand.CommandActions[2];
 
