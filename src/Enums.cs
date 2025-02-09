@@ -12,7 +12,8 @@
             KEYS,
             INFO,
             REPLCONF,
-            PSYNC
+            PSYNC,
+            WAIT
         }
 
         public enum HandshakeState

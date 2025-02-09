@@ -28,6 +28,7 @@ namespace codecrafters_redis.src
                 Commands.INFO => HandleInfoCommand(parsedCommand),
                 Commands.REPLCONF => HandleReplConfCommand(parsedCommand),
                 Commands.PSYNC => HandlePsyncCommand(parsedCommand),
+                Commands.WAIT => HandleWaitCommand(parsedCommand),
                 _ => ResponseHandler.ErrorResponse($"Unknown command: {action}")
             };
         }
@@ -161,6 +162,14 @@ namespace codecrafters_redis.src
                 ResponseHandler.ErrorResponse("wrong number of arguments for 'psync' command");
 
             return ResponseHandler.SimpleResponse($"{Enum.GetName(typeof(HandshakeState), HandshakeState.FULLRESYNC)} {configuration["server_id"]} 0");
+        }
+
+        private string HandleWaitCommand(Command parsedCommand)
+        {
+            if (parsedCommand.CommandActions.Count != 3)
+                ResponseHandler.ErrorResponse("wrong number of arguments for 'wait' command");
+
+            return ResponseHandler.IntigerResponse(0);
         }
     }
 }

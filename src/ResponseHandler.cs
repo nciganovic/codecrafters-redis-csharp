@@ -54,5 +54,14 @@ namespace codecrafters_redis.src
             response += Constants.SPACE_SING;
             return response;
         }
+
+        public static string IntigerResponse(int value)
+        {
+            string response = string.Empty;
+            response += Constants.COLON_CHAR;
+            response += value.ToString();
+            response += Constants.SPACE_SING;
+            return response;
+        }
     }
 }
