@@ -1,4 +1,5 @@
-﻿using static codecrafters_redis.src.Enums;
+﻿using System.Net.Sockets;
+using static codecrafters_redis.src.Enums;
 
 namespace codecrafters_redis.src
 {
@@ -7,12 +8,14 @@ namespace codecrafters_redis.src
         private readonly bool isMasterInstance;
         private readonly RedisDatabase inMemoryDatabase;
         private readonly Dictionary<string, string> configuration;
+        private readonly List<NetworkStream> slaveStreams;
 
-        public CommandHandler(RedisDatabase inMemoryDatabase, bool isMasterInstance, Dictionary<string, string> configuration)
+        public CommandHandler(RedisDatabase inMemoryDatabase, bool isMasterInstance, Dictionary<string, string> configuration, List<NetworkStream> slaveStreams)
         {
             this.inMemoryDatabase = inMemoryDatabase;
             this.isMasterInstance = isMasterInstance;   
             this.configuration = configuration;
+            this.slaveStreams = slaveStreams;
         }
 
         public string Handle(Commands action, Command parsedCommand)
@@ -169,7 +172,7 @@ namespace codecrafters_redis.src
             if (parsedCommand.CommandActions.Count != 3)
                 ResponseHandler.ErrorResponse("wrong number of arguments for 'wait' command");
 
-            return ResponseHandler.IntigerResponse(0);
+            return ResponseHandler.IntigerResponse(slaveStreams.Count);
         }
     }
 }

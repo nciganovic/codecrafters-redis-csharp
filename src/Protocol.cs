@@ -34,7 +34,7 @@ namespace codecrafters_redis.src
                     return;
 
                 List<Command> parsedCommands = ParseRequest(request);
-                CommandHandler commandHandler = new CommandHandler(inMemoryDatabase, IsMasterInstance, configuration);
+                CommandHandler commandHandler = new CommandHandler(inMemoryDatabase, IsMasterInstance, configuration, slaveStreams);
                 
                 foreach (var parsedCommand in parsedCommands)
                 {
