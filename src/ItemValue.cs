@@ -18,4 +18,5 @@ public record ItemValue
     public double ValidUntil { get => (hasExpiration) ? createdAt + TimeToLive : double.MaxValue; }
     public double TimeToLive { get; set; }
     public bool IsValid => ValidUntil > GetCurrentMiliseconds();
+    public static ItemValue InvalidItem => new ItemValue(string.Empty, -1);
 }

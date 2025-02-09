@@ -1,11 +1,4 @@
-﻿using System;
-using System.Collections.Generic;
-using System.Linq;
-using System.Text;
-using System.Text.RegularExpressions;
-using System.Threading.Tasks;
-
-namespace codecrafters_redis.src
+﻿namespace codecrafters_redis.src
 {
     public class RDSFileReader
     {
@@ -17,14 +10,13 @@ namespace codecrafters_redis.src
 
         private readonly string fileLocation;
 
-        public Dictionary<string, ItemValue> rdsDatabse  { get; private set; } 
+        public RedisDatabase Database { get; private set; } = new RedisDatabase();
 
         public RDSFileReader(string fileLocation, bool loadItems = false)
         {
             this.fileLocation = fileLocation;
-            rdsDatabse = new Dictionary<string, ItemValue>();
 
-            if(loadItems)
+            if (loadItems)
                 LoadItems();
         }
 
@@ -64,7 +56,7 @@ namespace codecrafters_redis.src
             int expireHashTableSize = reader.ReadByte();
 
             while (hashTableSize > 0)
-            { 
+            {
                 int nextByte = reader.ReadByte();
 
                 if (nextByte == EXPIRY_IN_MILISECONDS)
@@ -85,7 +77,7 @@ namespace codecrafters_redis.src
 
                     double ttl = timestamp - unixTime;
 
-                    rdsDatabse.Add(key, new ItemValue(value, ttl));
+                    Database.Set(key, new ItemValue(value, ttl));
                 }
                 else if (nextByte == EXPIRY_IN_SECONDS)
                 {
@@ -105,7 +97,7 @@ namespace codecrafters_redis.src
 
                     double ttl = (timestamp - unixTime) * 1000; //Convert to miliseconds
 
-                    rdsDatabse.Add(key, new ItemValue(value, ttl));
+                    Database.Set(key, new ItemValue(value, ttl));
                 }
                 else if (nextByte == STRING_VALUE_TYPE)
                 {
@@ -115,7 +107,7 @@ namespace codecrafters_redis.src
                     int valueSize = reader.ReadByte();
                     string value = new string(reader.ReadChars(valueSize));
 
-                    rdsDatabse.Add(key, new ItemValue(value));
+                    Database.Set(key, new ItemValue(value));
                 }
 
                 hashTableSize--;

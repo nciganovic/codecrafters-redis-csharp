@@ -1,63 +1,32 @@
-﻿using System;
-using System.ComponentModel.Design;
-using System.IO;
-using System.Net;
-using System.Net.Sockets;
+﻿using System.Net.Sockets;
 using System.Text;
 using System.Text.RegularExpressions;
+using static codecrafters_redis.src.Enums;
+using static codecrafters_redis.src.Constants;
 
 namespace codecrafters_redis.src
 {
     public class Protocol
     {
-        private const char ASTERISK_CHAR = '*';
-        private const char DOLLAR_CHAR = '$';
-        private const char PLUS_CHAR = '+';
-        private const string SPACE_SING = "\r\n";
-        private const string PING_RESPONSE = "PONG";
-        private const string OK_RESPONSE = "OK";
-        private const string NULL_RESPONSE = "-1";
-        private const string PX = "PX";
+        private int offset = 0;
 
-        private readonly string[] ReplConfSupportedParams = { "capa", "listening-port" };
-          
-        List<NetworkStream> slaveStreams = new List<NetworkStream>();
+        private List<NetworkStream> slaveStreams = new List<NetworkStream>();
 
-        private enum Commands
-        { 
-            PING,
-            ECHO,
-            GET,
-            SET,
-            CONFIG,
-            KEYS,
-            INFO,
-            REPLCONF,
-            PSYNC
-        }
+        private readonly Dictionary<string, string> configuration;
 
-        private readonly Dictionary<string, string> serverSettings;
+        private bool IsMasterInstance => !configuration.ContainsKey("replicaof");
 
-        public enum HanshakeState
+        public HandshakeState ProtocolHandshakeState { get; set; }
+
+        public RedisDatabase inMemoryDatabase { get; private set; }
+
+        public Protocol(Dictionary<string, string> configuration, RedisDatabase inMemoryDatabase)
         {
-            NONE,
-            PING,
-            REPLCONF1,
-            REPLCONF2,
-            PSYNC,
-            FULLRESYNC,
-            COMPLETED
-        }
-        public HanshakeState ProtocolHandshakeState { get; set; }
-
-        public bool IsMasterInstance => !serverSettings.ContainsKey("replicaof");
-
-        public Protocol(Dictionary<string, string> serverSettings)
-        {
-            this.serverSettings = serverSettings;
+            this.configuration = configuration;
+            this.inMemoryDatabase = inMemoryDatabase;
         }
 
-        public async Task Write(NetworkStream stream, string request, Dictionary<string, ItemValue> values)
+        public async Task Write(NetworkStream stream, string request)
         {
             try
             {
@@ -65,6 +34,8 @@ namespace codecrafters_redis.src
                     return;
 
                 List<Command> parsedCommands = ParseRequest(request);
+                CommandHandler commandHandler = new CommandHandler(inMemoryDatabase, IsMasterInstance, configuration);
+                
                 foreach (var parsedCommand in parsedCommands)
                 {
                     if (parsedCommand.CommandActions == null || parsedCommand.CommandActions.Count == 0)
@@ -72,33 +43,21 @@ namespace codecrafters_redis.src
 
                     if (!Enum.TryParse(parsedCommand.CommandActions[0], true, out Commands action))
                     {
-                        string errorMessage = ErrorResponse($"Unknown command: {parsedCommand.CommandActions[0]}");
+                        string errorMessage = ResponseHandler.ErrorResponse($"Unknown command: {parsedCommand.CommandActions[0]}");
                         await SendResponse(stream, errorMessage);
                         return;
                     }
 
-                    string response = action switch
-                    {
-                        Commands.PING => HandlePingResponse(),
-                        Commands.ECHO => HandleEchoCommand(parsedCommand),
-                        Commands.GET => HandleGetCommand(parsedCommand, values),
-                        Commands.SET => HandleSetCommand(parsedCommand, values),
-                        Commands.CONFIG => HandleConfigCommand(parsedCommand),
-                        Commands.KEYS => HandleKeysCommand(parsedCommand, values),
-                        Commands.INFO => HandleInfoCommand(parsedCommand),
-                        Commands.REPLCONF => HandleReplConfCommand(parsedCommand),
-                        Commands.PSYNC => HandlePsyncCommand(parsedCommand),
-                        _ => ErrorResponse($"Unknown command: {action}")
-                    };
+                    string response = commandHandler.Handle(action, parsedCommand);
 
-                    if (response != string.Empty)
+                    if (response != string.Empty && IsMasterInstance || action == Commands.GET || action == Commands.INFO)
                         await SendResponse(stream, response);
 
                     if (action == Commands.SET || action == Commands.GET || IsReplconfGetack(parsedCommand.CommandActions))
                     {
                         foreach (NetworkStream slaveStream in slaveStreams)
                         {
-                            await SendResponse(slaveStream, ArrayResponse(parsedCommand.CommandActions.ToArray()));
+                            await SendResponse(slaveStream, ResponseHandler.ArrayResponse(parsedCommand.CommandActions.ToArray()));
                         }
                     }
 
@@ -113,306 +72,202 @@ namespace codecrafters_redis.src
                         slaveStreams.Add(stream);
                     }
                 }
-                
+
             }
             catch (Exception ex)
             {
-                string errorMessage = ErrorResponse($"Error: {ex.Message}");
+                string errorMessage = ResponseHandler.ErrorResponse($"Error: {ex.Message} {ex.StackTrace}");
                 await SendResponse(stream, errorMessage);
             }
         }
 
         private bool IsReplconfGetack(List<string> commandActions)
-        { 
+        {
             return commandActions.Count == 3 && commandActions[0] == "REPLCONF" && commandActions[1] == "GETACK" && commandActions[2] == "*";
         }
 
-        public async Task HandleMasterSlaveHandshake(NetworkStream stream, string request, Dictionary<string, ItemValue> values)
+        public async Task HandleMasterSlaveHandshake(NetworkStream stream, string request)
         {
             string response = ProtocolHandshakeState switch
             {
-                HanshakeState.PING => CreateReplconf1Response(request),
-                HanshakeState.REPLCONF1 => CreateReplconf2Response(request),
-                HanshakeState.REPLCONF2 => CreatePsyncResponse(request),
-                HanshakeState.PSYNC => HandleFullresyncRequest(request),
+                HandshakeState.PING => CreateReplconf1Response(request),
+                HandshakeState.REPLCONF1 => CreateReplconf2Response(request),
+                HandshakeState.REPLCONF2 => CreatePsyncResponse(request),
+                HandshakeState.PSYNC => HandleFullresyncRequest(request),
                 _ => string.Empty
             };
-
-            //When FULLRESYNC first request will be FULLRESYNC sd23l754emvgmz53hk5dwuo7m5oe6cx4tzvc0cv2 0
-            //Second will be \$88\r\nREDIS0011?\tredis-ver♣7\.2\.0?\nredis-bits?@?♣ctime??eused-mem°?►aof-base???n;???Z? rdb file
-            //TODO on FULLRESYNC state handle saving rdb file that is sent from master
-
-            if (ProtocolHandshakeState == HanshakeState.FULLRESYNC)
-            { 
-                int index = request.IndexOf(ASTERISK_CHAR);
-                if(index > 0)
-                    request = request.Substring(index);
-
-                if (request[0] == ASTERISK_CHAR)
-                    await HandleWriteAsSlave(stream, request, values);
-
-                if (request == "*3\r\n$8\r\nREPLCONF\r\n$6\r\nGETACK\r\n$1\r\n*\r\n")
-                   response = ArrayResponse(["REPLCONF", "ACK", "0"]);
-            }
 
             if (response != string.Empty)
                 await SendResponse(stream, response);
         }
+        public async Task HandleSlaveCommand(NetworkStream stream, string fullRequest)
+        {
+            //When FULLRESYNC first request will be FULLRESYNC sd23l754emvgmz53hk5dwuo7m5oe6cx4tzvc0cv2 0
+            //Second will be \$88\r\nREDIS0011?\tredis-ver♣7\.2\.0?\nredis-bits?@?♣ctime??eused-mem°?►aof-base???n;???Z? rdb file
+            //TODO on FULLRESYNC state handle saving rdb file that is sent from master
+
+            //Refactoring: handle each action as separate request, very important for slave
+            //Make logical destincions between salve and master maybe to seperate classes
+            //Move simple actions to separate class 
+
+            //fullRequest = "\\+FULLRESYNC\\ 75cd7bc10c49047e0d163660f3b90625b1af31dc\\ 0\\r\\n\\$88\\r\\nREDIS0011�\\tredis-ver\u00057\\.2\\.0�\\nredis-bits�@�\u0005ctime��eused-mem°�\u0010aof-base���n;���Z�\\*3\\r\\n\\$8\\r\\nREPLCONF\\r\\n\\$6\\r\\nGETACK\\r\\n\\$1\\r\\n\\*\\r\\n";
+            //fullRequest = "\\+FULLRESYNC\\ 75cd7bc10c49047e0d163660f3b90625b1af31dc\\ 0\\r\\n\\$88\\r\\nREDIS0011�\\tredis-ver\u00057\\.2\\.0�\\nredis-bits�@�\u0005ctime��eused-mem°�\u0010aof-base���n;���Z�\\*3\\r\\n\\$8\\r\\nREPLCONF\\r\\n\\$6\\r\\nGETACK\\r\\n\\$1\\r\\n\\*\\r\\n";
+            //fullRequest = "\\$88\\r\\nREDIS0011�\\tredis-ver\u00057\\.2\\.0�\\nredis-bits�@�\u0005ctime��eused-mem°�\u0010aof-base���n;���Z�\\*3\\r\\n\\$8\\r\\nREPLCONF\\r\\n\\$6\\r\\nGETACK\\r\\n\\$1\\r\\n\\*\\r\\n";
+            //fullRequest = "\\*1\\r\\n\\$4\\r\\nPING\\r\\n\\*3\\r\\n\\$8\\r\\nREPLCONF\\r\\n\\$6\\r\\nGETACK\\r\\n\\$1\\r\\n\\*\\r\\n";
+            //fullRequest = "\\*3\\r\\n\\$3\\r\\nSET\\r\\n\\$3\\r\\nfoo\\r\\n\\$3\\r\\n123\\r\\n\\*3\\r\\n\\$3\\r\\nSET\\r\\n\\$3\\r\\nbar\\r\\n\\$3\\r\\n456\\r\\n\\*3\\r\\n\\$3\\r\\nSET\\r\\n\\$3\\r\\nbaz\\r\\n\\$3\\r\\n789\\r\\n";
+
+            int emptyRdbIndex = fullRequest.IndexOf("$88");
+            if (emptyRdbIndex != -1)
+                fullRequest = fullRequest.Substring(emptyRdbIndex);
+
+            List<string> requests = Regex.Split(fullRequest, @"\*\d+").ToList();
+
+            if (requests.Count() == 1 && requests[0].IndexOf("$88") != -1)
+                return;
+
+            requests.RemoveAll(x => x.Length <= 1);
+            requests.RemoveAll(x => x.IndexOf("$88") != -1);
+
+            List<string> cplRequest = new List<string>();
+            requests.ForEach(x =>
+            {
+                int paramsCount = Regex.Matches(x, @"\$\d+").Count();
+                cplRequest.Add($"*{paramsCount}" + x);
+            });
+
+            foreach (string req in cplRequest)
+            {
+                if (req.Contains(Enum.GetName(typeof(HandshakeState), HandshakeState.FULLRESYNC) ?? "FULLRESYNC"))
+                    continue;
+
+                var commands = ParseRequest(req);
+
+                await HandleWriteAsSlave(stream, req);
+
+                if (IsReplconfGetack(commands[0].CommandActions))
+                    await SendResponse(stream, ResponseHandler.ArrayResponse(["REPLCONF", "ACK", offset.ToString()]));
+                offset += Encoding.ASCII.GetBytes(req).Length;
+                Console.WriteLine($"Request => {Regex.Escape(req)} added {Encoding.ASCII.GetBytes(req).Length}");
+            }
+        }
+
+        public string[] TrimCommandsFromRequest(string request)
+        {
+            // Split the string into lines
+            string[] lines = request.Split(new[] { @"\r\n" }, StringSplitOptions.None);
+
+            List<string> commands = new List<string>();
+            List<string> currentCommand = new List<string>();
+
+            foreach (string line in lines)
+            {
+                if (line.StartsWith("*") && currentCommand.Count > 0)
+                {
+                    // Save the current command as a single string
+                    commands.Add(string.Join(@"\r\n", currentCommand));
+                    currentCommand.Clear();
+                }
+                currentCommand.Add(line);
+            }
+
+            // Add the last command if it exists
+            if (currentCommand.Count > 0)
+            {
+                commands.Add(string.Join(@"\r\n", currentCommand));
+            }
+
+            return lines;
+        }
 
         public async Task SendPingRequest(NetworkStream stream)
         {
-            string request = ArrayResponse([Enum.GetName(typeof(Commands), Commands.PING) ?? "PING"]);
+            string request = ResponseHandler.ArrayResponse([Enum.GetName(typeof(Commands), Commands.PING) ?? "PING"]);
             await SendResponse(stream, request);
         }
 
         private string CreateReplconf1Response(string request)
         {
-            if (request != SimpleResponse(PING_RESPONSE))
-                ErrorResponse("Recived: " + request + ", expected: " + SimpleResponse(PING_RESPONSE));
+            if (request != ResponseHandler.SimpleResponse(PING_RESPONSE))
+                ResponseHandler.ErrorResponse("Recived: " + request + ", expected: " + ResponseHandler.SimpleResponse(PING_RESPONSE));
 
-            string slavePort = serverSettings["port"];
+            string slavePort = configuration["port"];
             string repconfCommand = Enum.GetName(typeof(Commands), Commands.REPLCONF) ?? "REPLCONF";
-            ProtocolHandshakeState = HanshakeState.REPLCONF1;
-            return ArrayResponse([repconfCommand, "listening-port", slavePort.ToString()]);
+            ProtocolHandshakeState = HandshakeState.REPLCONF1;
+            return ResponseHandler.ArrayResponse([repconfCommand, "listening-port", slavePort.ToString()]);
         }
 
         private string CreateReplconf2Response(string request)
         {
-            if (request != SimpleResponse(OK_RESPONSE))
-                ErrorResponse("Recived: " + request + ", expected: " + SimpleResponse(OK_RESPONSE));
+            if (request != ResponseHandler.SimpleResponse(OK_RESPONSE))
+                ResponseHandler.ErrorResponse("Recived: " + request + ", expected: " + ResponseHandler.SimpleResponse(OK_RESPONSE));
 
             string repconfCommand = Enum.GetName(typeof(Commands), Commands.REPLCONF) ?? "REPLCONF";
-            ProtocolHandshakeState = HanshakeState.REPLCONF2;
-            return ArrayResponse([repconfCommand, "capa", "psync2"]);
+            ProtocolHandshakeState = HandshakeState.REPLCONF2;
+            return ResponseHandler.ArrayResponse([repconfCommand, "capa", "psync2"]);
         }
 
         private string CreatePsyncResponse(string request)
         {
-            if (request != SimpleResponse(OK_RESPONSE))
-                ErrorResponse("Recived: " + request + ", expected: " + SimpleResponse(OK_RESPONSE));
+            if (request != ResponseHandler.SimpleResponse(OK_RESPONSE))
+                ResponseHandler.ErrorResponse("Recived: " + request + ", expected: " + ResponseHandler.SimpleResponse(OK_RESPONSE));
 
             string repconfCommand = Enum.GetName(typeof(Commands), Commands.PSYNC) ?? "PSYNC";
-            ProtocolHandshakeState = HanshakeState.PSYNC;
-            return ArrayResponse([repconfCommand, "?", "-1"]);
+            ProtocolHandshakeState = HandshakeState.PSYNC;
+            return ResponseHandler.ArrayResponse([repconfCommand, "?", "-1"]);
         }
 
         private string HandleFullresyncRequest(string request)
         {
             if (!isFullresyncResponseValid(request))
-                ErrorResponse($"Response {request} is not valid {Enum.GetName(typeof(HanshakeState), HanshakeState.FULLRESYNC)} pattern");
+                ResponseHandler.ErrorResponse($"Response {request} is not valid {Enum.GetName(typeof(HandshakeState), HandshakeState.FULLRESYNC)} pattern");
 
             string[] parameters = request.Split(' ');
-            serverSettings["master_server_id"] = parameters[1];
-            ProtocolHandshakeState = HanshakeState.FULLRESYNC;
-            Console.WriteLine("Handshake completed with " + serverSettings["master_server_id"]);
+            configuration["master_server_id"] = parameters[1];
+            ProtocolHandshakeState = HandshakeState.FULLRESYNC;
+            Console.WriteLine("Handshake completed with " + configuration["master_server_id"]);
             return string.Empty;
         }
 
-        private async Task<string> HandleWriteAsSlave(NetworkStream stream, string request, Dictionary<string, ItemValue> values)
+        private async Task<string> HandleWriteAsSlave(NetworkStream stream, string request)
         {
-            await Write(stream, request, values);
+            await Write(stream, request);
             return string.Empty;
-        }
-
-        private string HandlePingResponse()
-        {
-            return SimpleResponse(PING_RESPONSE);
-        }
-
-        private string HandleEchoCommand(Command parsedCommand)
-        {
-            if (parsedCommand.CommandActions.Count != 2)
-                ErrorResponse("ECHO command excpects one parameter");
-
-            return BulkResponse(parsedCommand.CommandActions[1]);
-        }
-
-        private string HandleGetCommand(Command parsedCommand, Dictionary<string, ItemValue> values)
-        {
-            if (parsedCommand.CommandActions.Count != 2)
-                return ErrorResponse("GET expects one parameter");
-
-            string key = parsedCommand.CommandActions[1];
-
-            if (values.TryGetValue(key, out var item) && item.IsValid)
-                return BulkResponse(item.Value);
-
-            values.Remove(key); 
-            return NullResponse();
-        }
-
-        private string HandleSetCommand(Command parsedCommand, Dictionary<string, ItemValue> values)
-        {
-            if (parsedCommand.CommandActions.Count < 2)
-                ErrorResponse("SET command requiers at least 2 parameters, key and value");
-
-            string key = parsedCommand.CommandActions[1];
-            string value = parsedCommand.CommandActions[2];
-
-            double timeToLive = double.MaxValue;
-
-            if (parsedCommand.CommandActions.Count > 3 && parsedCommand.CommandActions[3].ToUpper() == PX)
-                timeToLive = Convert.ToDouble(parsedCommand.CommandActions[4]);
-
-            values[key] = new ItemValue(value, timeToLive);
-
-
-            return IsMasterInstance ? SimpleResponse(OK_RESPONSE) : string.Empty;
-        }
-
-        private string HandleConfigCommand(Command parsedCommand)
-        {
-            if (parsedCommand.CommandActions.Count != 3)
-                ErrorResponse("wrong number of parameters for config command");
-
-            if (parsedCommand.CommandActions[1].ToUpper() != Enum.GetName(typeof(Commands), Commands.GET))
-                ErrorResponse("Only get command for CONFIG action is currently supported");
-
-            if (!serverSettings.ContainsKey(parsedCommand.CommandActions[2]))
-                ErrorResponse($"Key {parsedCommand.CommandActions[2]} not found");
-
-            string[] elements = { parsedCommand.CommandActions[2], serverSettings[parsedCommand.CommandActions[2]] };
-            return ArrayResponse(elements);
-        }
-
-        private string HandleKeysCommand(Command parsedCommand, Dictionary<string, ItemValue> values)
-        {
-            if (parsedCommand.CommandActions.Count != 2)
-                ErrorResponse("wrong number of arguments for 'keys' command");
-
-            string pattern = parsedCommand.CommandActions[1];
-
-            //select all keys
-            if (pattern == $"{ASTERISK_CHAR}")
-            {
-                List<string> keys = new List<string>();
-                foreach (string key in values.Keys)
-                {
-                    if (values[key].IsValid)
-                        keys.Add(key);
-                    else
-                        values.Remove(key);
-                }
-
-                return ArrayResponse(keys.ToArray());
-            }
-
-            return NullResponse();
-        }
-
-        private string HandleInfoCommand(Command parsedCommand)
-        {
-            Console.WriteLine("enter info command");
-
-            if (parsedCommand.CommandActions.Count != 2)
-                ErrorResponse("wrong number of arguments for 'info' command");
-
-            string infoType = parsedCommand.CommandActions[1];
-            if (infoType != "replication")
-                ErrorResponse("unsupported type of info command");
-
-            string role = IsMasterInstance ? "master" : "slave";
-            string info = $"role:{role}";
-
-            string[] items = new string[3];
-            items[0] = info;
-            items[1] = $"master_replid:{serverSettings["server_id"]}";
-            items[2] = "master_repl_offset:0";
-
-            return BulkResponse(string.Join(SPACE_SING, items));
-        }
-
-        private string HandleReplConfCommand(Command parsedCommand)
-        {
-            if (parsedCommand.CommandActions.Count != 3)
-                ErrorResponse("wrong number of arguments for 'replconf' command");
-
-            if (parsedCommand.CommandActions[1] == "GETACK" || parsedCommand.CommandActions[1] == "ACK")
-                return string.Empty;
-
-            serverSettings[parsedCommand.CommandActions[1]] = parsedCommand.CommandActions[2];
-
-            return SimpleResponse(OK_RESPONSE);
-        }
-
-        private string HandlePsyncCommand(Command parsedCommand)
-        {
-            if (parsedCommand.CommandActions.Count != 3)
-                ErrorResponse("wrong number of arguments for 'psync' command");
-
-            return SimpleResponse($"{Enum.GetName(typeof(HanshakeState), HanshakeState.FULLRESYNC)} {serverSettings["server_id"]} 0");
         }
 
         private async Task SendResponse(NetworkStream stream, string response)
         {
             byte[] responseData = Encoding.UTF8.GetBytes(response);
             await stream.WriteAsync(responseData, 0, responseData.Length);
-            Console.WriteLine("Response sent: " + response);
-        }
-
-        private string ErrorResponse(string message)
-        {
-            return $"-ERROR {message}{SPACE_SING}";
-        }
-
-        private string SimpleResponse(string value)
-        {
-            string echo = string.Empty;
-            echo += PLUS_CHAR;
-            echo += value;
-            echo += SPACE_SING;
-            return echo;
-        }
-
-        private string ArrayResponse(string[] elements)
-        {
-            string echo = string.Empty;
-            echo += ASTERISK_CHAR;
-            echo += elements.Length;
-            echo += SPACE_SING;
-            foreach (var element in elements)
-            {
-                echo += BulkResponse(element);
-            }
-            return echo;
-        }
-
-        private string BulkResponse(string value)
-        {
-            string echo = string.Empty;
-            echo += DOLLAR_CHAR;
-            echo += value.Length;
-            echo += SPACE_SING;
-            echo += value;
-            echo += SPACE_SING;
-            return echo;
-        }
-
-        private string NullResponse()
-        {
-            string response = string.Empty;
-            response += DOLLAR_CHAR;
-            response += NULL_RESPONSE;
-            response += SPACE_SING;
-            return response;
+            Console.WriteLine("Response sent: " + Regex.Escape(response));
         }
 
         private List<Command> ParseRequest(string request)
         {
+            //Remove everything before first asterix
+            int firstAst = request.IndexOf(ASTERISK_CHAR);
+            request = request.Substring(firstAst);
+
+            //Replace \\ with \
+            request = request.Replace("\\*", "*")
+                             .Replace("\\$", "$")
+                             .Replace("\\?", "?")
+                             .Replace("\\r", "\r")
+                             .Replace("\\n", "\n");
+
             string[] requestList = Regex.Split(request, @"\*\d+");
 
-            if(requestList.Length == 0)
+            if (requestList.Length == 0)
                 throw new ArgumentException($"{ASTERISK_CHAR} required as first parameter");
 
             List<Command> commands = new List<Command>();
 
             foreach (string command in requestList)
             {
-                if (command.Length == 0)
+                if (command.Length == 0 || command == "\\")
                     continue;
 
                 List<string> commandParams = command.Split(SPACE_SING).ToList();
-            
+
                 if (commandParams.Count == 0)
                     throw new ArgumentException($"Invalid command, no {SPACE_SING} found");
 
@@ -434,7 +289,7 @@ namespace codecrafters_redis.src
                     }
                 }
 
-                foreach(int cmd in commandParamsToRemove)
+                foreach (int cmd in commandParamsToRemove)
                     commandParams.RemoveAt(cmd);
 
                 commands.Add(new Command { CommandActions = commandParams, CommandParams = commandDict });
@@ -451,7 +306,7 @@ namespace codecrafters_redis.src
         }
     }
 
-    class Command
+    public class Command
     {
         public List<string> CommandActions { get; set; } = new List<string>();
         public Dictionary<string, string> CommandParams { get; set; } = new Dictionary<string, string>();
