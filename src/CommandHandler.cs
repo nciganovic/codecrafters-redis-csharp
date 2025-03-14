@@ -1,24 +1,31 @@
-﻿using System.Net.Sockets;
+﻿using System.ComponentModel;
+using System.Net.Sockets;
 using static codecrafters_redis.src.Enums;
 
 namespace codecrafters_redis.src
 {
     public class CommandHandler
     {
+        private readonly NetworkStream stream;
         private readonly bool isMasterInstance;
         private readonly RedisDatabase inMemoryDatabase;
         private readonly Dictionary<string, string> configuration;
         private readonly List<NetworkStream> slaveStreams;
+        private List<NetworkStream> syncStreams;
+        private readonly int offset;
 
-        public CommandHandler(RedisDatabase inMemoryDatabase, bool isMasterInstance, Dictionary<string, string> configuration, List<NetworkStream> slaveStreams)
+        public CommandHandler(NetworkStream stream, RedisDatabase inMemoryDatabase, bool isMasterInstance, Dictionary<string, string> configuration, List<NetworkStream> slaveStreams, List<NetworkStream> syncStreams, int offset)
         {
+            this.stream = stream;   
             this.inMemoryDatabase = inMemoryDatabase;
             this.isMasterInstance = isMasterInstance;   
             this.configuration = configuration;
             this.slaveStreams = slaveStreams;
+            this.syncStreams = syncStreams; 
+            this.offset = offset;
         }
 
-        public string Handle(Commands action, Command parsedCommand)
+        public async Task<string> Handle(Commands action, Command parsedCommand)
         {
             return action switch
             {
@@ -31,14 +38,14 @@ namespace codecrafters_redis.src
                 Commands.INFO => HandleInfoCommand(parsedCommand),
                 Commands.REPLCONF => HandleReplConfCommand(parsedCommand),
                 Commands.PSYNC => HandlePsyncCommand(parsedCommand),
-                Commands.WAIT => HandleWaitCommand(parsedCommand),
+                Commands.WAIT => await HandleWaitCommand(parsedCommand),
                 _ => ResponseHandler.ErrorResponse($"Unknown command: {action}")
             };
         }
 
         private string HandlePingCommand()
         {
-            return ResponseHandler.SimpleResponse(Constants.PING_RESPONSE);
+            return ResponseHandler.SimpleResponse(Constants.PONG);
         }
 
         private string HandleEchoCommand(Command parsedCommand)
@@ -152,7 +159,16 @@ namespace codecrafters_redis.src
                 ResponseHandler.ErrorResponse("wrong number of arguments for 'replconf' command");
 
             if (parsedCommand.CommandActions[1] == "GETACK" || parsedCommand.CommandActions[1] == "ACK")
+            {
+                if (parsedCommand.CommandActions[1] == "ACK")
+                {
+                    int ackBytes = Convert.ToInt32(parsedCommand.CommandActions[1]);
+                    if (ackBytes == offset)
+                        syncStreams.Add(stream);
+                }
+
                 return string.Empty;
+            }
 
             configuration[parsedCommand.CommandActions[1]] = parsedCommand.CommandActions[2];
 
@@ -167,12 +183,31 @@ namespace codecrafters_redis.src
             return ResponseHandler.SimpleResponse($"{Enum.GetName(typeof(HandshakeState), HandshakeState.FULLRESYNC)} {configuration["server_id"]} 0");
         }
 
-        private string HandleWaitCommand(Command parsedCommand)
+        private async Task<string> HandleWaitCommand(Command parsedCommand)
         {
             if (parsedCommand.CommandActions.Count != 3)
                 ResponseHandler.ErrorResponse("wrong number of arguments for 'wait' command");
 
-            return ResponseHandler.IntigerResponse(slaveStreams.Count);
+            int minNumberOfReplicas = Convert.ToInt32(parsedCommand.CommandActions[1]);
+            int timeoutForCommand = Convert.ToInt32(parsedCommand.CommandActions[2]);
+
+            if(slaveStreams.Count == 0)
+                return ResponseHandler.IntigerResponse(slaveStreams.Count);
+
+            if (offset == 0)
+            {
+                Thread.Sleep(timeoutForCommand);
+                return ResponseHandler.IntigerResponse(slaveStreams.Count);
+            }
+
+            foreach (var replica in slaveStreams)
+            {
+                replica.Socket.ReceiveTimeout = timeoutForCommand;
+                await Protocol.SendResponse(replica, "*3\r\n$8\r\nREPLCONF\r\n$6\r\nGETACK\r\n$1\r\n*\r\n");
+            }
+
+            Thread.Sleep(timeoutForCommand);
+            return ResponseHandler.IntigerResponse(syncStreams.Count);
         }
     }
 }

@@ -1,0 +1,38 @@
+Refacotring notes
+
+- Add validation for command methods, there are currently exceptions thrown if command is not reciveing arguments expected.
+- Many commands and identical in RedisLeader and RedisFollower
+- Use methods for generating responses 
+- CONFIG command is probablly better written in my example
+- ECHO GET CONFIG KEYS are identical
+- SET, INFO are very similar
+
+ECHO
+echo -ne "*2\r\n\$4\r\nECHO\r\n\$4\r\ntest\r\n" | nc localhost 6379
+
+GET 
+echo -ne "*2\r\n\$3\r\nGET\r\n\$4\r\ntest\r\n" | nc localhost 6379
+
+SET
+echo -ne "*3\r\n\$3\r\nSET\r\n\$4\r\nname\r\n\$4\r\ntest\r\n" | nc localhost 6379
+echo -ne "*5\r\n\$3\r\nSET\r\n\$4\r\nname\r\n\$4\r\ntest\r\n\$2\r\npx\r\n\$3\r\n123\r\n" | nc localhost 6379
+
+PING
+echo -ne "*1\r\n\$4\r\nPING\r\n" | nc localhost 6379
+echo -ne "*2\r\n\$4\r\nPING\r\n\$5\r\nhello\r\n" | nc localhost 6379
+
+CONFIG
+echo -ne "*3\r\n\$6\r\nCONFIG\r\n\$3\r\nGET\r\n\$3\r\ndir\r\n" | nc localhost 6379 
+echo -ne "*4\r\n\$6\r\nCONFIG\r\n\$3\r\nSET\r\n\$7\r\ntimeout\r\n\$3\r\n300\r\n" | nc localhost 6379
+
+KEYS 
+echo -ne "*2\r\n\$4\r\nKEYS\r\n\$1\r\n*\r\n" | nc localhost 6379
+
+INFO
+echo -ne "*2\r\n\$4\r\nINFO\r\n\$9\r\nreplication\r\n" | nc localhost 6379
+
+REPLCONF
+echo -ne "*3\r\n\$8\r\nREPLCONF\r\n\$14\r\nlistening-port\r\n\$4\r\n6380\r\n" | nc localhost 6379
+
+WAIT
+echo -ne "*3\r\n\$4\r\nWAIT\r\n\$2\r\n10\r\n\$4\r\n5000\r\n" | nc localhost 6379

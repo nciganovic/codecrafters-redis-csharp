@@ -11,6 +11,7 @@ namespace codecrafters_redis.src
         private int offset = 0;
 
         private List<NetworkStream> slaveStreams = new List<NetworkStream>();
+        private List<NetworkStream> syncStreams = new List<NetworkStream>();
 
         private readonly Dictionary<string, string> configuration;
 
@@ -30,11 +31,14 @@ namespace codecrafters_redis.src
         {
             try
             {
+                if(stream.Socket.ReceiveTimeout > 0)
+                    stream.Socket.ReceiveTimeout = 0;   
+
                 if (request.Length > 0 && (request[0] == PLUS_CHAR || request[0] == DOLLAR_CHAR))
                     return;
 
                 List<Command> parsedCommands = ParseRequest(request);
-                CommandHandler commandHandler = new CommandHandler(inMemoryDatabase, IsMasterInstance, configuration, slaveStreams);
+                CommandHandler commandHandler = new CommandHandler(stream, inMemoryDatabase, IsMasterInstance, configuration, slaveStreams, syncStreams, offset);
                 
                 foreach (var parsedCommand in parsedCommands)
                 {
@@ -48,7 +52,7 @@ namespace codecrafters_redis.src
                         return;
                     }
 
-                    string response = commandHandler.Handle(action, parsedCommand);
+                    string response = await commandHandler.Handle(action, parsedCommand);
 
                     if (response != string.Empty && IsMasterInstance || action == Commands.GET || action == Commands.INFO)
                         await SendResponse(stream, response);
@@ -187,8 +191,8 @@ namespace codecrafters_redis.src
 
         private string CreateReplconf1Response(string request)
         {
-            if (request != ResponseHandler.SimpleResponse(PING_RESPONSE))
-                ResponseHandler.ErrorResponse("Recived: " + request + ", expected: " + ResponseHandler.SimpleResponse(PING_RESPONSE));
+            if (request != ResponseHandler.SimpleResponse(PONG))
+                ResponseHandler.ErrorResponse("Recived: " + request + ", expected: " + ResponseHandler.SimpleResponse(PONG));
 
             string slavePort = configuration["port"];
             string repconfCommand = Enum.GetName(typeof(Commands), Commands.REPLCONF) ?? "REPLCONF";
@@ -234,7 +238,7 @@ namespace codecrafters_redis.src
             return string.Empty;
         }
 
-        private async Task SendResponse(NetworkStream stream, string response)
+        public static async Task SendResponse(NetworkStream stream, string response)
         {
             byte[] responseData = Encoding.UTF8.GetBytes(response);
             await stream.WriteAsync(responseData, 0, responseData.Length);

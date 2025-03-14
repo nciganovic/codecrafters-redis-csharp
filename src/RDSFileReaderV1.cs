@@ -1,6 +1,6 @@
 ﻿namespace codecrafters_redis.src
 {
-    public class RDSFileReader
+    public class RDSFileReaderV1
     {
         private const byte DB_START = 0xFE;
         private const byte DB_INDICATOR = 0xFB;
@@ -12,7 +12,7 @@
 
         public RedisDatabase Database { get; private set; } = new RedisDatabase();
 
-        public RDSFileReader(string fileLocation, bool loadItems = false)
+        public RDSFileReaderV1(string fileLocation, bool loadItems = false)
         {
             this.fileLocation = fileLocation;
 

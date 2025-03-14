@@ -1,10 +1,16 @@
 using codecrafters_redis.src;
-using System.Net;
-using System.Net.Sockets;
-using System.Text;
-using System.Text.RegularExpressions;
-using static codecrafters_redis.src.Enums;
 
+List<string> cliArgs = args.ToList();
+
+CLIArgumentsBuilder argBuilder = new CLIArgumentsBuilder(cliArgs);
+CLIArguments arguments = argBuilder.Build();
+
+RedisServerBuilder serverBuilder = new RedisServerBuilder(arguments);
+var server = serverBuilder.Build();
+
+server.StartServer();
+
+/*
 // echo -ne "*2\r\n$4\r\nKEYS\r\n$1\r\n*\r\n" | nc localhost 6380
 
 RedisDatabase inMemoryDatabase = new RedisDatabase();
@@ -25,7 +31,7 @@ if (configuration.ContainsKey("dir") && configuration.ContainsKey("dbfilename"))
 
     if (File.Exists(dir))
     {
-        var reader = new RDSFileReader(dir, true);
+        var reader = new codecrafters_redis.src.RDSFileReader(dir, true);
         inMemoryDatabase = reader.Database;
     }
 }
@@ -142,4 +148,4 @@ static Dictionary<string, string> CollectParameters(string[] args)
         }
     }
     return keyValuePairs;
-}
+}*/
