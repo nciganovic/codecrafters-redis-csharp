@@ -7,6 +7,8 @@ Refacotring notes
 - ECHO GET CONFIG KEYS are identical
 - SET, INFO are very similar
 
+- RDSFileReaderV1 is depricated
+
 ECHO
 echo -ne "*2\r\n\$4\r\nECHO\r\n\$4\r\ntest\r\n" | nc localhost 6379
 

@@ -155,6 +155,13 @@ namespace codecrafters_redis.src
 
         protected virtual void HandleWaitCommand(RedisProtocolParser.RESPMessage command, Socket socket) { }
 
+        protected void HandleTypeCommand(RedisProtocolParser.RESPMessage command, Socket socket) 
+        {
+            var keyToRetrieve = command.GetKey();
+            StoredValue? retrievedValue = _storage.Get(keyToRetrieve);
+            SendResponse((retrievedValue != null) ? "string" : "none", socket); 
+        }
+
         protected void HandleUnrecognizedComamnd(Socket socket)
         {
             SendResponse(ResponseHandler.NullResponse(), socket);
@@ -231,6 +238,10 @@ namespace codecrafters_redis.src
 
                         case "WAIT":
                             HandleWaitCommand(command, socket);
+                            break;
+
+                        case "TYPE":
+                            HandleTypeCommand(command, socket);
                             break;
 
                         default:
