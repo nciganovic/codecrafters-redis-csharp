@@ -159,7 +159,7 @@ namespace codecrafters_redis.src
         {
             var keyToRetrieve = command.GetKey();
             StoredValue? retrievedValue = _storage.Get(keyToRetrieve);
-            SendResponse((retrievedValue != null) ? "string" : "none", socket); 
+            SendResponse(ResponseHandler.SimpleResponse((retrievedValue != null) ? "string" : "none"), socket); 
         }
 
         protected void HandleUnrecognizedComamnd(Socket socket)
