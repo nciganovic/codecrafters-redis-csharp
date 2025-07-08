@@ -1,6 +1,4 @@
-﻿using System;
-using System.Collections.Generic;
-using System.Globalization;
+﻿using System.Globalization;
 using System.Net.Sockets;
 using System.Net;
 using System.Text;
@@ -23,6 +21,7 @@ namespace codecrafters_redis.src
         protected int _listeningPort;
         protected TcpListener _server;
         protected RedisDatabaseStored _storage;
+        protected RedisStreamStorage _streamStorage;
         protected string? _directory;
         protected string? _dbfilename;
         protected RDSFileReader _reader;
@@ -33,6 +32,7 @@ namespace codecrafters_redis.src
             _listeningPort = port;
             _server = new TcpListener(IPAddress.Any, port);
             _storage = new RedisDatabaseStored();
+            _streamStorage = new RedisStreamStorage();
             _directory = dir;
             _dbfilename = dbName;
             _reader = new RDSFileReader(_directory + "/" + _dbfilename);
@@ -159,7 +159,34 @@ namespace codecrafters_redis.src
         {
             var keyToRetrieve = command.GetKey();
             StoredValue? retrievedValue = _storage.Get(keyToRetrieve);
-            SendResponse(ResponseHandler.SimpleResponse((retrievedValue != null) ? "string" : "none"), socket); 
+
+            string type = (retrievedValue != null) ? "string" : "none";
+            if (type == "none" && _streamStorage.StreamExists(keyToRetrieve))
+                type = "stream";
+
+            SendResponse(ResponseHandler.SimpleResponse(type), socket); 
+        }
+
+        protected void HandleStreamAddCommand(RedisProtocolParser.RESPMessage command, Socket socket)
+        {
+            //Correct command is XADD stream_key stream_id property_name property_value
+            var streamName = command.GetKey();
+            string streamId = command.arguments[2];
+
+            Dictionary<string, string> entries = new ();
+            for (int i = 3; i < command.arguments.Count; i += 2)
+            {
+                entries.Add(command.arguments[i], command.arguments[i + 1]);
+            }
+
+            RedisStreamEntries streamEntry = new RedisStreamEntries(streamId, entries);
+
+            if(!_streamStorage.StreamExists(streamName))
+                _streamStorage.AddStream(new RedisStream(streamName));
+
+            _streamStorage.AddEntryToStream(streamName, streamEntry);
+
+            SendResponse(ResponseHandler.BulkResponse(streamId), socket);
         }
 
         protected void HandleUnrecognizedComamnd(Socket socket)
@@ -242,6 +269,10 @@ namespace codecrafters_redis.src
 
                         case "TYPE":
                             HandleTypeCommand(command, socket);
+                            break;
+
+                        case "XADD":
+                            HandleStreamAddCommand(command, socket);
                             break;
 
                         default:

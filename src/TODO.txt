@@ -38,3 +38,9 @@ echo -ne "*3\r\n\$8\r\nREPLCONF\r\n\$14\r\nlistening-port\r\n\$4\r\n6380\r\n" | 
 
 WAIT
 echo -ne "*3\r\n\$4\r\nWAIT\r\n\$2\r\n10\r\n\$4\r\n5000\r\n" | nc localhost 6379
+
+TYPE 
+echo -ne "*2\r\n\$4\r\nTYPE\r\n\$4\r\ntest\r\n" | nc localhost 6379
+
+XADD 
+echo -ne "*5\r\n\$4\r\nXADD\r\n\$4\r\nst_1\r\n\$1\r\n1\r\n\$3\r\nfoo\r\n\$3\r\nbar" | nc localhost 6379

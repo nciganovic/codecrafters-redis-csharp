@@ -2,7 +2,7 @@
   "profiles": {
     "codecrafters-redis": {
       "commandName": "Project",
-      "commandLineArgs": "--port 6379"
+      "commandLineArgs": "XADD stream_key 0-1 foo bar"
     }
   }
 }
