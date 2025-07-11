@@ -56,7 +56,7 @@ namespace codecrafters_redis.src
         {
             if(entryId == "*")
             {
-                int currentTimestamp = (int)(DateTime.UtcNow - new DateTime(1970, 1, 1)).TotalSeconds;
+                long currentTimestamp = new DateTimeOffset(DateTime.UtcNow).ToUnixTimeMilliseconds();
                 int sameTimeStamps = stream.Entries.Where(x => x.CreatedAt == currentTimestamp).Count();
                 
                 entryId = $"{currentTimestamp}-{sameTimeStamps}";
@@ -96,8 +96,8 @@ namespace codecrafters_redis.src
     public record RedisStreamEntry (string Id, Dictionary<string, string> Values)
     {
         public string Id { get; private set; } = Id;
-        public long CreatedAt { get; private set; } = Convert.ToInt64(Id.Split('-')[0]);
-        public int Sequence { get; private set; } = Convert.ToInt32(Id.Split('-')[1]);
+        public long CreatedAt => Convert.ToInt64(Id.Split('-')[0]);
+        public int Sequence => Convert.ToInt32(Id.Split('-')[1]);
         public Dictionary<string, string> Values { get; private set; } = Values;
     }
 }
