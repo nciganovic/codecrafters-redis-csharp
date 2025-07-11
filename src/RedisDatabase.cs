@@ -59,26 +59,26 @@ namespace codecrafters_redis.src
                 int currentTimestamp = (int)(DateTime.UtcNow - new DateTime(1970, 1, 1)).TotalSeconds;
                 int sameTimeStamps = stream.Entries.Where(x => x.CreatedAt == currentTimestamp).Count();
                 
-                if (sameTimeStamps == 0)
-                    entryId = $"{currentTimestamp}-0";
-                else
-                    entryId = $"{currentTimestamp}-{sameTimeStamps + 1}";
+                entryId = $"{currentTimestamp}-{sameTimeStamps}";
             }
             else if (entryId.Split("-")[1] == "*")
             { 
                 long timestamp = Convert.ToInt64(entryId.Split("-")[0]);
                 int sameTimeStamps = stream.Entries.Where(x => x.CreatedAt == timestamp).Count();
 
-                if (sameTimeStamps == 0 && timestamp > 0)
-                    entryId = $"{timestamp}-0";
-                else
-                    entryId = $"{timestamp}-{sameTimeStamps + 1}";
+                if (timestamp == 0 && sameTimeStamps == 0)
+                    sameTimeStamps = 1;
+
+                entryId = $"{timestamp}-{sameTimeStamps}";
             }
             else
             {
                 long timestamp = Convert.ToInt64(entryId.Split("-")[0]);
                 int sequence = Convert.ToInt32(entryId.Split("-")[1]);
-                
+
+                if (timestamp == 0 && sequence == 0)
+                    sequence = 1;
+
                 entryId = $"{timestamp}-{sequence}";
             }
 
