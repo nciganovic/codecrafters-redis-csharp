@@ -190,7 +190,7 @@ namespace codecrafters_redis.src
 
             _streamStorage.AddEntryToStream(streamName, redisStreamEntry);
 
-            SendResponse(ResponseHandler.BulkResponse(streamId), socket);
+            SendResponse(ResponseHandler.BulkResponse(redisStreamEntry.Id), socket);
         }
 
         private bool IsStreamEntryValid(Socket socket, RedisStream stream, string entryId)
@@ -199,7 +199,7 @@ namespace codecrafters_redis.src
             if (entryId != "*" && !Regex.IsMatch(entryId, @"^\d+-(?:\d+|\*)$"))
             {
                 SendResponse(ResponseHandler.ErrorResponse("The ID specified in XADD is invalid format"), socket);
-                return false;;
+                return false;
             }
 
             if (entryId == "*")
