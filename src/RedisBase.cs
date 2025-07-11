@@ -2,6 +2,8 @@
 using System.Net.Sockets;
 using System.Net;
 using System.Text;
+using System.Text.RegularExpressions;
+using System.IO;
 
 namespace codecrafters_redis.src
 {
@@ -161,7 +163,7 @@ namespace codecrafters_redis.src
             StoredValue? retrievedValue = _storage.Get(keyToRetrieve);
 
             string type = (retrievedValue != null) ? "string" : "none";
-            if (type == "none" && _streamStorage.StreamExists(keyToRetrieve))
+            if (type == "none" && _streamStorage.GetStream(keyToRetrieve) != null)
                 type = "stream";
 
             SendResponse(ResponseHandler.SimpleResponse(type), socket); 
@@ -173,20 +175,72 @@ namespace codecrafters_redis.src
             var streamName = command.GetKey();
             string streamId = command.arguments[2];
 
-            Dictionary<string, string> entries = new ();
+            RedisStream redisStream = _streamStorage.GetOrCreateStream(streamName);
+
+            if (!IsStreamEntryValid(socket, redisStream, streamId))
+                return;
+
+            Dictionary<string, string> entries = new();
             for (int i = 3; i < command.arguments.Count; i += 2)
             {
                 entries.Add(command.arguments[i], command.arguments[i + 1]);
             }
 
-            RedisStreamEntries streamEntry = new RedisStreamEntries(streamId, entries);
+            RedisStreamEntry redisStreamEntry = _streamStorage.GenerateValidEntry(redisStream, streamId, entries);
 
-            if(!_streamStorage.StreamExists(streamName))
-                _streamStorage.AddStream(new RedisStream(streamName));
-
-            _streamStorage.AddEntryToStream(streamName, streamEntry);
+            _streamStorage.AddEntryToStream(streamName, redisStreamEntry);
 
             SendResponse(ResponseHandler.BulkResponse(streamId), socket);
+        }
+
+        private bool IsStreamEntryValid(Socket socket, RedisStream stream, string entryId)
+        {
+            // Matches the format of stream ID like "123-456" or "123-*"
+            if (entryId != "*" && !Regex.IsMatch(entryId, @"^\d+-(?:\d+|\*)$"))
+            {
+                SendResponse(ResponseHandler.ErrorResponse("The ID specified in XADD is invalid format"), socket);
+                return false;;
+            }
+
+            if (entryId == "*")
+                return true;
+            else if (entryId.Split("-")[1] == "*")
+            {
+                long timestamp = Convert.ToInt64(entryId.Split("-")[0]);
+
+                if (stream.Entries.Any())
+                {
+                    RedisStreamEntry lastEntry = stream.Entries.Last();
+                    if (lastEntry.CreatedAt > timestamp)
+                    {
+                        SendResponse(ResponseHandler.ErrorResponse("The ID specified in XADD is equal or smaller than the target stream top item"), socket);
+                        return false;
+                    }
+                }
+            }
+            else
+            {
+                long timestamp = Convert.ToInt64(entryId.Split("-")[0]);
+                int sequence = Convert.ToInt32(entryId.Split("-")[1]);
+
+                if (timestamp == 0 && sequence == 0)
+                {
+                    SendResponse(ResponseHandler.ErrorResponse("The ID specified in XADD must be greater than 0-0"), socket);
+                    return false;
+                }
+
+                if (stream.Entries.Any())
+                {
+                    RedisStreamEntry lastEntry = stream.Entries.Last();
+                    if (lastEntry.CreatedAt > timestamp || (lastEntry.CreatedAt == timestamp && lastEntry.Sequence >= sequence))
+                    {
+                        SendResponse(ResponseHandler.ErrorResponse("The ID specified in XADD is equal or smaller than the target stream top item"), socket);
+                        return false;
+                    }
+                }
+            }
+
+            return true;
         }
 
         protected void HandleUnrecognizedComamnd(Socket socket)

@@ -26,12 +26,20 @@ namespace codecrafters_redis.src
             return RedisStreams.FirstOrDefault(s => s.Name == name);
         }
 
-        public bool StreamExists(string streamName)
+        public RedisStream GetOrCreateStream(string streamName)
         {
-            return RedisStreams.Any(s => s.Name == streamName);
-        }   
+            RedisStream? redisStream = GetStream(streamName);
+           
+            if (redisStream == null)
+            {
+                redisStream = new RedisStream(streamName);
+                AddStream(redisStream);
+            }
 
-        public void AddEntryToStream(string streamName, RedisStreamEntries entry)
+            return redisStream;
+        }
+
+        public void AddEntryToStream(string streamName, RedisStreamEntry entry)
         {
             var stream = GetStream(streamName);
             if (stream != null)
@@ -43,18 +51,53 @@ namespace codecrafters_redis.src
                 throw new Exception($"Stream {streamName} does not exist.");
             }
         }
+
+        public RedisStreamEntry GenerateValidEntry(RedisStream stream, string entryId, Dictionary<string, string> entries)
+        {
+            if(entryId == "*")
+            {
+                int currentTimestamp = (int)(DateTime.UtcNow - new DateTime(1970, 1, 1)).TotalSeconds;
+                int sameTimeStamps = stream.Entries.Where(x => x.CreatedAt == currentTimestamp).Count();
+                
+                if (sameTimeStamps == 0)
+                    entryId = $"{currentTimestamp}-0";
+                else
+                    entryId = $"{currentTimestamp}-{sameTimeStamps + 1}";
+            }
+            else if (entryId.Split("-")[1] == "*")
+            { 
+                long timestamp = Convert.ToInt64(entryId.Split("-")[0]);
+                int sameTimeStamps = stream.Entries.Where(x => x.CreatedAt == timestamp).Count();
+
+                if (sameTimeStamps == 0 && timestamp > 0)
+                    entryId = $"{timestamp}-0";
+                else
+                    entryId = $"{timestamp}-{sameTimeStamps + 1}";
+            }
+            else
+            {
+                long timestamp = Convert.ToInt64(entryId.Split("-")[0]);
+                int sequence = Convert.ToInt32(entryId.Split("-")[1]);
+                
+                entryId = $"{timestamp}-{sequence}";
+            }
+
+            return new RedisStreamEntry(entryId, entries);
+        }
     }
 
     public record RedisStream (string Name)
     {
         public string Name { get; private set; } = Name;
 
-        public List<RedisStreamEntries> Entries = new List<RedisStreamEntries>();
+        public List<RedisStreamEntry> Entries = new List<RedisStreamEntry>();
     }
 
-    public record RedisStreamEntries (string Id, Dictionary<string, string> Values)
+    public record RedisStreamEntry (string Id, Dictionary<string, string> Values)
     {
         public string Id { get; private set; } = Id;
+        public long CreatedAt { get; private set; } = Convert.ToInt64(Id.Split('-')[0]);
+        public int Sequence { get; private set; } = Convert.ToInt32(Id.Split('-')[1]);
         public Dictionary<string, string> Values { get; private set; } = Values;
     }
 }

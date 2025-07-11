@@ -10,7 +10,7 @@ namespace codecrafters_redis.src
     {
         public static string ErrorResponse(string message)
         {
-            return $"-ERROR {message}{Constants.SPACE_SING}";
+            return $"-ERR {message}{Constants.SPACE_SING}";
         }
 
         public static string SimpleResponse(string value)

@@ -11,7 +11,6 @@
         public const string OK_RESPONSE = "OK";
         public const string NULL_RESPONSE = "-1";
         public const string PX = "PX";
-        public const string ERROR_RESP_PREF = "-ERROR";
         public const string PONG = "PONG";
         public const string PING = "PING";
     }
