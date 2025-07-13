@@ -284,8 +284,8 @@ namespace codecrafters_redis.src
 
         protected void HandleStreamReadCommand(RedisProtocolParser.RESPMessage command, Socket socket)
         {
-            var streamName = command.GetKey();
-            string startStreamId = command.arguments[2];
+            var streamName = command.arguments[2];
+            string startStreamId = command.arguments[3];
 
             RedisStream? stream = _streamStorage.GetStream(streamName);
 
@@ -318,8 +318,11 @@ namespace codecrafters_redis.src
             }
 
 
+            string streamNameBulk = ResponseHandler.BulkResponse(streamName);
             string streamResponse = ResponseHandler.SimpleArrayResponse(responses.ToArray());
-            SendResponse(ResponseHandler.SimpleArrayResponse([streamName, streamResponse]), socket);
+            string finalResponse = ResponseHandler.SimpleArrayResponse(new string[] { streamNameBulk, streamResponse });
+            
+            SendResponse(ResponseHandler.SimpleArrayResponse([finalResponse]), socket);
         }
 
         protected void HandleUnrecognizedComamnd(Socket socket)
