@@ -35,6 +35,19 @@ namespace codecrafters_redis.src
             return echo;
         }
 
+        public static string SimpleArrayResponse(string[] elements)
+        {
+            string echo = string.Empty;
+            echo += Constants.ASTERISK_CHAR;
+            echo += elements.Length;
+            echo += Constants.SPACE_SING;
+            foreach (var element in elements)
+            {
+                echo += element;
+            }
+            return echo;
+        }
+
         public static string BulkResponse(string value)
         {
             string echo = string.Empty;

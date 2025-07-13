@@ -243,6 +243,45 @@ namespace codecrafters_redis.src
             return true;
         }
 
+        protected void HandleStreamRangeCommand(RedisProtocolParser.RESPMessage command, Socket socket)
+        {
+            var streamName = command.GetKey();
+            string startStreamId = command.arguments[2];
+            string endStreamId = command.arguments[3];
+
+            RedisStream? stream = _streamStorage.GetStream(streamName);
+
+            if (stream == null)
+            {
+                SendResponse(ResponseHandler.ErrorResponse($"Stream {streamName} does not exist."), socket);
+                return;
+            }
+
+            List<RedisStreamEntry> entries = stream.GetEntriesInRange(startStreamId, endStreamId);
+            List<string> responses = new List<string>();
+
+            foreach (RedisStreamEntry entry in entries)
+            {
+                List<string> innerResponses = new List<string>();
+                string bulkResponse = ResponseHandler.BulkResponse(entry.Id);
+                innerResponses.Add(bulkResponse);
+                List<string> entryValueResponese = new List<string>();  
+                foreach (var kvp in entry.Values)
+                {
+                    entryValueResponese.Add(kvp.Key);
+                    entryValueResponese.Add(kvp.Value);
+                }
+
+                string entryValueResponse = ResponseHandler.ArrayResponse(entryValueResponese.ToArray());
+                innerResponses.Add(entryValueResponse);
+
+                string totalEntryResponse = ResponseHandler.SimpleArrayResponse(innerResponses.ToArray());
+                responses.Add(totalEntryResponse);
+            }
+
+            SendResponse(ResponseHandler.SimpleArrayResponse(responses.ToArray()), socket);
+        }
+
         protected void HandleUnrecognizedComamnd(Socket socket)
         {
             SendResponse(ResponseHandler.NullResponse(), socket);
@@ -327,6 +366,10 @@ namespace codecrafters_redis.src
 
                         case "XADD":
                             HandleStreamAddCommand(command, socket);
+                            break;
+
+                        case "XRANGE":
+                            HandleStreamRangeCommand(command, socket);
                             break;
 
                         default:

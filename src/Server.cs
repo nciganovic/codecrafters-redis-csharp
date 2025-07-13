@@ -1,5 +1,7 @@
 using codecrafters_redis.src;
 
+//RespGenerator respGenerator = new RespGenerator();
+
 List<string> cliArgs = args.ToList();
 
 CLIArgumentsBuilder argBuilder = new CLIArgumentsBuilder(cliArgs);

@@ -91,6 +91,25 @@ namespace codecrafters_redis.src
         public string Name { get; private set; } = Name;
 
         public List<RedisStreamEntry> Entries = new List<RedisStreamEntry>();
+
+        public List<RedisStreamEntry> GetEntriesInRange(string startStreamId, string endStreamId)
+        {
+            string[] startStreamInfo = startStreamId.Split('-');
+            string[] endStreamInfo = endStreamId.Split('-');
+
+            long startTimestamp = Convert.ToInt64(startStreamInfo[0]);
+            long endTimestamp = Convert.ToInt64(endStreamInfo[0]);
+            
+            int startSequence = startStreamInfo.Length > 1 ? Convert.ToInt32(startStreamInfo[1]) : 0;
+            int endSequence = endStreamInfo.Length > 1 ? Convert.ToInt32(endStreamInfo[1]) : int.MaxValue;
+
+            return Entries.Where(entry =>
+                entry.CreatedAt >= startTimestamp &&
+                entry.CreatedAt <= endTimestamp &&
+                entry.Sequence >= startSequence &&
+                entry.Sequence <= endSequence)
+                .ToList();
+        }
     }
 
     public record RedisStreamEntry (string Id, Dictionary<string, string> Values)
