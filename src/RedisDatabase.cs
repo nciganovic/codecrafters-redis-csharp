@@ -92,20 +92,16 @@ namespace codecrafters_redis.src
 
         public List<RedisStreamEntry> Entries = new List<RedisStreamEntry>();
 
-        public List<RedisStreamEntry> GetEntriesInRange(string startStreamId, string endStreamId)
-        {/*
-            string[] startStreamInfo = startStreamId.Split('-');
-            string[] endStreamInfo = endStreamId.Split('-');
-
-            long startTimestamp = Convert.ToInt64(startStreamInfo[0]);
-            long endTimestamp = Convert.ToInt64(endStreamInfo[0]);
-            
-            int startSequence = startStreamInfo.Length > 1 ? Convert.ToInt32(startStreamInfo[1]) : 0;
-            int endSequence = endStreamInfo.Length > 1 ? Convert.ToInt32(endStreamInfo[1]) : int.MaxValue;
-            */
+        public List<RedisStreamEntry> GetEntriesInRange(string startStreamId, string endStreamId, bool inclusiveStart)
+        {
             (long startTimestamp, int startSequence) = GetTimestampAndSequenceFromId(startStreamId);
             (long endTimestamp, int endSequence) = GetTimestampAndSequenceFromId(endStreamId);
-            
+
+            if (!inclusiveStart)
+            {
+                startSequence += 1; // Exclude the start entry if not inclusive
+            }
+
             return Entries.Where(entry =>
                 entry.CreatedAt >= startTimestamp &&
                 entry.CreatedAt <= endTimestamp &&
