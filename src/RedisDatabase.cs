@@ -93,7 +93,7 @@ namespace codecrafters_redis.src
         public List<RedisStreamEntry> Entries = new List<RedisStreamEntry>();
 
         public List<RedisStreamEntry> GetEntriesInRange(string startStreamId, string endStreamId)
-        {
+        {/*
             string[] startStreamInfo = startStreamId.Split('-');
             string[] endStreamInfo = endStreamId.Split('-');
 
@@ -102,13 +102,29 @@ namespace codecrafters_redis.src
             
             int startSequence = startStreamInfo.Length > 1 ? Convert.ToInt32(startStreamInfo[1]) : 0;
             int endSequence = endStreamInfo.Length > 1 ? Convert.ToInt32(endStreamInfo[1]) : int.MaxValue;
-
+            */
+            (long startTimestamp, int startSequence) = GetTimestampAndSequenceFromId(startStreamId);
+            (long endTimestamp, int endSequence) = GetTimestampAndSequenceFromId(endStreamId);
+            
             return Entries.Where(entry =>
                 entry.CreatedAt >= startTimestamp &&
                 entry.CreatedAt <= endTimestamp &&
                 entry.Sequence >= startSequence &&
                 entry.Sequence <= endSequence)
                 .ToList();
+        }
+
+        private (long, int) GetTimestampAndSequenceFromId(string id)
+        {
+            if(id == "-")
+                return (0, 0);
+            else if(id == "+")
+                return (long.MaxValue, int.MaxValue);
+
+            var parts = id.Split('-');
+            long timestamp = Convert.ToInt64(parts[0]);
+            int sequence = parts.Length > 1 ? Convert.ToInt32(parts[1]) : 0;
+            return (timestamp, sequence);
         }
     }
 
