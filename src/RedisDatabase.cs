@@ -1,5 +1,6 @@
 ﻿using System.Collections.Concurrent;
 using System.Reflection.Metadata.Ecma335;
+using System.Text.RegularExpressions;
 
 namespace codecrafters_redis.src
 {
@@ -88,6 +89,8 @@ namespace codecrafters_redis.src
 
     public record RedisStream (string Name)
     {
+        public static bool IsStreamFormatValid(string entryId) => Regex.IsMatch(entryId, @"^\d+-(?:\d+|\*)$");
+
         public string Name { get; private set; } = Name;
 
         public List<RedisStreamEntry> Entries = new List<RedisStreamEntry>();

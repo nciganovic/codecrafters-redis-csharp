@@ -196,7 +196,7 @@ namespace codecrafters_redis.src
         private bool IsStreamEntryValid(Socket socket, RedisStream stream, string entryId)
         {
             // Matches the format of stream ID like "123-456" or "123-*"
-            if (entryId != "*" && !Regex.IsMatch(entryId, @"^\d+-(?:\d+|\*)$"))
+            if (entryId != "*" && !RedisStream.IsStreamFormatValid(entryId))
             {
                 SendResponse(ResponseHandler.ErrorResponse("The ID specified in XADD is invalid format"), socket);
                 return false;
@@ -284,45 +284,63 @@ namespace codecrafters_redis.src
 
         protected void HandleStreamReadCommand(RedisProtocolParser.RESPMessage command, Socket socket)
         {
-            var streamName = command.arguments[2];
-            string startStreamId = command.arguments[3];
+            List<string> streamNames = new List<string>();
+            List<string> streamIds = new List<string>();
 
-            RedisStream? stream = _streamStorage.GetStream(streamName);
-
-            if (stream == null)
+            for (int i = 2; i < command.arguments.Count; i++)
             {
-                SendResponse(ResponseHandler.ErrorResponse($"Stream {streamName} does not exist."), socket);
-                return;
+                string arg = command.arguments[i];
+ 
+                if (RedisStream.IsStreamFormatValid(arg))
+                    streamIds.Add(arg); // This is a stream ID
+                else
+                    streamNames.Add(arg); // This is a stream name
             }
 
-            List<RedisStreamEntry> entries = stream.GetEntriesInRange(startStreamId, "+", false);
-            List<string> responses = new List<string>();
-
-            foreach (RedisStreamEntry entry in entries)
+            List<string> streamResponses = new List<string>();
+            for (int i = 0; i < streamNames.Count; i++)
             {
-                List<string> innerResponses = new List<string>();
-                string bulkResponse = ResponseHandler.BulkResponse(entry.Id);
-                innerResponses.Add(bulkResponse);
-                List<string> entryValueResponese = new List<string>();
-                foreach (var kvp in entry.Values)
+                string streamName = streamNames[i];
+                string startStreamId = streamIds.Count > i ? streamIds[i] : "0-0"; // Default to "0-0" if no ID is provided
+                
+                RedisStream? stream = _streamStorage.GetStream(streamName);
+
+                if (stream == null)
                 {
-                    entryValueResponese.Add(kvp.Key);
-                    entryValueResponese.Add(kvp.Value);
+                    SendResponse(ResponseHandler.ErrorResponse($"Stream {streamName} does not exist."), socket);
+                    return;
                 }
 
-                string entryValueResponse = ResponseHandler.ArrayResponse(entryValueResponese.ToArray());
-                innerResponses.Add(entryValueResponse);
+                List<RedisStreamEntry> entries = stream.GetEntriesInRange(startStreamId, "+", false);
+                List<string> responses = new List<string>();
 
-                string totalEntryResponse = ResponseHandler.SimpleArrayResponse(innerResponses.ToArray());
-                responses.Add(totalEntryResponse);
+                foreach (RedisStreamEntry entry in entries)
+                {
+                    List<string> innerResponses = new List<string>();
+                    string bulkResponse = ResponseHandler.BulkResponse(entry.Id);
+                    innerResponses.Add(bulkResponse);
+                    List<string> entryValueResponese = new List<string>();
+                    foreach (var kvp in entry.Values)
+                    {
+                        entryValueResponese.Add(kvp.Key);
+                        entryValueResponese.Add(kvp.Value);
+                    }
+
+                    string entryValueResponse = ResponseHandler.ArrayResponse(entryValueResponese.ToArray());
+                    innerResponses.Add(entryValueResponse);
+
+                    string totalEntryResponse = ResponseHandler.SimpleArrayResponse(innerResponses.ToArray());
+                    responses.Add(totalEntryResponse);
+                }
+
+
+                string streamNameBulk = ResponseHandler.BulkResponse(streamName);
+                string streamResponse = ResponseHandler.SimpleArrayResponse(responses.ToArray());
+                string finalResponse = ResponseHandler.SimpleArrayResponse(new string[] { streamNameBulk, streamResponse });
+                streamResponses.Add(finalResponse);
             }
 
-
-            string streamNameBulk = ResponseHandler.BulkResponse(streamName);
-            string streamResponse = ResponseHandler.SimpleArrayResponse(responses.ToArray());
-            string finalResponse = ResponseHandler.SimpleArrayResponse(new string[] { streamNameBulk, streamResponse });
-            
-            SendResponse(ResponseHandler.SimpleArrayResponse([finalResponse]), socket);
+            SendResponse(ResponseHandler.SimpleArrayResponse(streamResponses.ToArray()), socket);
         }
 
         protected void HandleUnrecognizedComamnd(Socket socket)
