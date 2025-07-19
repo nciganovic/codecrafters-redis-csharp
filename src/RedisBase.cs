@@ -114,6 +114,33 @@ namespace codecrafters_redis.src
             }
         }
 
+        protected void HandleIncrementCommand(RedisProtocolParser.RESPMessage command, Socket socket)
+        {
+            string keyToIncrement = command.GetKey();
+            StoredValue? retrievedValue = _storage.Get(keyToIncrement);
+
+            if (retrievedValue != null)
+            {
+                if (long.TryParse(retrievedValue.Value, out long currentValue))
+                {
+                    currentValue++;
+                    retrievedValue.Value = currentValue.ToString();
+                    _storage.Set(keyToIncrement, retrievedValue);
+                    SendResponse(ResponseHandler.IntegerResponse(currentValue), socket);
+                }
+                else
+                {
+                    SendResponse(ResponseHandler.ErrorResponse("Value is not an integer"), socket);
+                }
+            }
+            else
+            {
+                // If key does not exist, set it to 1
+                _storage.Set(keyToIncrement, new StoredValue("1", null));
+                SendResponse(ResponseHandler.IntegerResponse(1), socket);
+            }
+        }
+
         protected virtual void HandleConfigComamnd(RedisProtocolParser.RESPMessage command, Socket socket)
         {
             var configToGet = command.GetConfigParameter();
@@ -294,8 +321,6 @@ namespace codecrafters_redis.src
 
         protected void HandleStreamReadCommand(RedisProtocolParser.RESPMessage command, Socket socket)
         {
-            Console.WriteLine("Handling XREAD command");
-
             List<string> streamNames = new List<string>();
             List<string> streamIds = new List<string>();
             int blockTime = -1; // Default to -1 (no blocking)
@@ -323,7 +348,6 @@ namespace codecrafters_redis.src
                 Thread.Sleep(blockTime);
 
             (string simpleArrayResponse, bool hasEntries) = GenerateSimpleArrayResponseForStreams(streamNames, streamIds, blockTime > 0);
-            Console.WriteLine("After Simple Response for Strems");
 
             if (blockTime == 0 && !hasEntries)
             {
@@ -336,22 +360,15 @@ namespace codecrafters_redis.src
 
                     stream.InfiniteWaiting = true;
                 }
-
-                //return;
             }
-
-
 
             if (blockTime != -1 && !hasEntries)
             {
-                Console.WriteLine("Sending null response!");
                 SendResponse(ResponseHandler.NullResponse(), socket);
                 return;
             }
 
-            Console.WriteLine("Sending simple array response!");
             SendResponse(simpleArrayResponse, socket);
-            Console.WriteLine("Finish Handling XREAD command");
         }
 
         private (string, bool) GenerateSimpleArrayResponseForStreams(List<string> streamNames, List<string> streamIds, bool isSlept)
@@ -456,6 +473,10 @@ namespace codecrafters_redis.src
 
                         case "GET":
                             HandleGetCommand(command, socket);
+                            break;
+
+                        case "INCR":
+                            HandleIncrementCommand(command, socket);
                             break;
 
                         case "CONFIG":

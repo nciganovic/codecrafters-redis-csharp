@@ -22,6 +22,15 @@ namespace codecrafters_redis.src
             return echo;
         }
 
+        public static string IntegerResponse(long value)
+        {
+            string echo = string.Empty;
+            echo += Constants.COLON_CHAR;
+            echo += value.ToString();
+            echo += Constants.SPACE_SING;
+            return echo;
+        }
+
         public static string ArrayResponse(string[] elements)
         {
             string echo = string.Empty;
