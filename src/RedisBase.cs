@@ -190,6 +190,14 @@ namespace codecrafters_redis.src
 
             _streamStorage.AddEntryToStream(streamName, redisStreamEntry);
 
+            if(redisStream.InfiniteWaiting)
+            {
+                (string response, _) = GenerateSimpleArrayResponseForStreams([streamName], [streamId]);
+                SendResponse(response, socket);
+                redisStream.InfiniteWaiting = false;
+                return;
+            }
+
             SendResponse(ResponseHandler.BulkResponse(redisStreamEntry.Id), socket);
         }
 
@@ -310,28 +318,34 @@ namespace codecrafters_redis.src
             if (blockTime != -1)
                 Thread.Sleep(blockTime);
 
-            int addedEntriesDuringPause = 0;
+            //int addedEntriesDuringPause = 0;
 
-            List<string> streamResponses = new List<string>();
+            //List<string> streamResponses = new List<string>();
+
+            (string simpleArrayResponse, bool hasEntries) = GenerateSimpleArrayResponseForStreams(streamNames, streamIds);
+
+            if (blockTime == 0 && !hasEntries)
+            {
+                foreach (string streamName in streamNames)
+                {
+                    RedisStream? stream = _streamStorage.GetStream(streamName);
+
+                    if (stream == null)
+                        continue;
+
+                    stream.InfiniteWaiting = true;
+                }
+
+                return;
+            }
+
+            /*
             for (int i = 0; i < streamNames.Count; i++)
             {
                 string streamName = streamNames[i];
                 string startStreamId = streamIds.Count > i ? streamIds[i] : "0-0"; // Default to "0-0" if no ID is provided
                 
                 RedisStream? stream = _streamStorage.GetStream(streamName);                
-
-                /*
-                if (stream == null)
-                {
-                    SendResponse(ResponseHandler.ErrorResponse($"Stream {streamName} does not exist."), socket);
-                    return;
-                }*/
-
-               // if (blockTime != -1)
-                //{
-                    //stream.Timeout = blockTime;
-                   // stream.RefreshBlockTimestamp();
-                //}
 
                 List<RedisStreamEntry> entries = (stream != null) ? stream.GetEntriesInRange(startStreamId, "+", false) : new List<RedisStreamEntry>();
                 List<string> responses = new List<string>();
@@ -362,15 +376,63 @@ namespace codecrafters_redis.src
                 string streamResponse = ResponseHandler.SimpleArrayResponse(responses.ToArray());
                 string finalResponse = ResponseHandler.SimpleArrayResponse(new string[] { streamNameBulk, streamResponse });
                 streamResponses.Add(finalResponse);
-            }
+            }*/
 
-            if (blockTime != -1 && addedEntriesDuringPause == 0)
+            if (blockTime != -1 && !hasEntries)
             {
                 SendResponse(ResponseHandler.NullResponse(), socket);
                 return;
             }
 
-            SendResponse(ResponseHandler.SimpleArrayResponse(streamResponses.ToArray()), socket);
+            SendResponse(simpleArrayResponse, socket);
+            //SendResponse(ResponseHandler.SimpleArrayResponse(streamResponses.ToArray()), socket);
+        }
+
+        private (string, bool) GenerateSimpleArrayResponseForStreams(List<string> streamNames, List<string> streamIds)
+        {
+            List<string> streamResponses = new List<string>();
+            bool hasEntries = false;
+
+            for (int i = 0; i < streamNames.Count; i++)
+            {
+                string streamName = streamNames[i];
+                string startStreamId = streamIds.Count > i ? streamIds[i] : "0-0"; // Default to "0-0" if no ID is provided
+
+                RedisStream? stream = _streamStorage.GetStream(streamName);
+
+                List<RedisStreamEntry> entries = (stream != null) ? stream.GetEntriesInRange(startStreamId, "+", false) : new List<RedisStreamEntry>();
+                List<string> responses = new List<string>();
+
+                if(entries.Count > 0)
+                    hasEntries = true;
+
+                foreach (RedisStreamEntry entry in entries)
+                {
+                    List<string> innerResponses = new List<string>();
+                    string bulkResponse = ResponseHandler.BulkResponse(entry.Id);
+                    innerResponses.Add(bulkResponse);
+                    List<string> entryValueResponese = new List<string>();
+                    foreach (var kvp in entry.Values)
+                    {
+                        entryValueResponese.Add(kvp.Key);
+                        entryValueResponese.Add(kvp.Value);
+                    }
+
+                    string entryValueResponse = ResponseHandler.ArrayResponse(entryValueResponese.ToArray());
+                    innerResponses.Add(entryValueResponse);
+
+                    string totalEntryResponse = ResponseHandler.SimpleArrayResponse(innerResponses.ToArray());
+                    responses.Add(totalEntryResponse);
+                }
+
+
+                string streamNameBulk = ResponseHandler.BulkResponse(streamName);
+                string streamResponse = ResponseHandler.SimpleArrayResponse(responses.ToArray());
+                string finalResponse = ResponseHandler.SimpleArrayResponse(new string[] { streamNameBulk, streamResponse });
+                streamResponses.Add(finalResponse);
+            }
+
+            return (ResponseHandler.SimpleArrayResponse(streamResponses.ToArray()), hasEntries);
         }
 
         protected void HandleUnrecognizedComamnd(Socket socket)

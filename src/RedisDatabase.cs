@@ -95,19 +95,7 @@ namespace codecrafters_redis.src
 
         public List<RedisStreamEntry> Entries = new List<RedisStreamEntry>();
 
-        public bool IsBlocking => Timeout > 0;
-
-        public int Timeout { get; set; }
-
-        public long BlockTimestamp { get; private set; } = 0;
-
-        public void RefreshBlockTimestamp()
-        {
-            if (Timeout > 0)
-                BlockTimestamp = new DateTimeOffset(DateTime.UtcNow).ToUnixTimeMilliseconds() + Timeout;
-            else
-                BlockTimestamp = 0; // No blocking
-        }
+        public bool InfiniteWaiting { get; set; } = false;
 
         public List<RedisStreamEntry> GetEntriesInRange(string startStreamId, string endStreamId, bool inclusiveStart)
         {

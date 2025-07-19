@@ -52,7 +52,8 @@ XRANGE
 echo -ne "*4\r\n\$6\r\nXRANGE\r\n\$8\r\nsome_key\r\n\$13\r\n1526985054069\r\n\$13\r\n1526985054079\r\n" | nc localhost 6379
 
 XREAD 
-echo -ne "*6\r\n\$5\r\nXREAD\r\n\$5\r\nblock\r\n\$4\r\n1000\r\n\$7\r\nstreams\r\n\$10\r\nstream_key\r\n\$3\r\n0-1\r\n" | nc localhost 6379
+echo -ne "*6\r\n\$5\r\nXREAD\r\n\$5\r\nblock\r\n\$4\r\n1000\r\n\$7\r\nstreams\r\n\$8\r\nsome_key\r\n\$3\r\n0-1\r\n" | nc localhost 6379
+echo -ne "*6\r\n\$5\r\nXREAD\r\n\$5\r\nblock\r\n\$1\r\n0\r\n\$7\r\nstreams\r\n\$8\r\nsome_key\r\n\$3\r\n0-1\r\n" | nc localhost 6379
 
 Running another instance of Redis server
 cd C:\Users\nikol\Documents\Github\codecrafters-redis-csharp\bin\Debug\net8.0
