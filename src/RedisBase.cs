@@ -219,7 +219,7 @@ namespace codecrafters_redis.src
 
             _streamStorage.AddEntryToStream(streamName, redisStreamEntry);
 
-            SendResponse(ResponseHandler.BulkResponse(redisStreamEntry.Id), socket);
+            //SendResponse(ResponseHandler.BulkResponse(redisStreamEntry.Id), socket);
 
             if (redisStream.InfiniteWaiting)
             {
@@ -227,6 +227,11 @@ namespace codecrafters_redis.src
                 SendResponse(response, socket);
                 redisStream.InfiniteWaiting = false;
                 return;
+            }
+            else
+            {
+                // If the stream is not in infinite waiting mode, we just send the response
+                SendResponse(ResponseHandler.BulkResponse(redisStreamEntry.Id), socket);
             }
         }
 
