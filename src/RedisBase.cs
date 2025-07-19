@@ -180,6 +180,8 @@ namespace codecrafters_redis.src
             if (!IsStreamEntryValid(socket, redisStream, streamId))
                 return;
 
+            string previousEntryId = redisStream.Entries.LastOrDefault()?.Id ?? "0-0"; 
+
             Dictionary<string, string> entries = new();
             for (int i = 3; i < command.arguments.Count; i += 2)
             {
@@ -190,15 +192,15 @@ namespace codecrafters_redis.src
 
             _streamStorage.AddEntryToStream(streamName, redisStreamEntry);
 
-            if(redisStream.InfiniteWaiting)
+            SendResponse(ResponseHandler.BulkResponse(redisStreamEntry.Id), socket);
+
+            if (redisStream.InfiniteWaiting)
             {
-                (string response, _) = GenerateSimpleArrayResponseForStreams([streamName], [streamId]);
+                (string response, _) = GenerateSimpleArrayResponseForStreams([streamName], [previousEntryId], false);
                 SendResponse(response, socket);
                 redisStream.InfiniteWaiting = false;
                 return;
             }
-
-            SendResponse(ResponseHandler.BulkResponse(redisStreamEntry.Id), socket);
         }
 
         private bool IsStreamEntryValid(Socket socket, RedisStream stream, string entryId)
@@ -292,6 +294,8 @@ namespace codecrafters_redis.src
 
         protected void HandleStreamReadCommand(RedisProtocolParser.RESPMessage command, Socket socket)
         {
+            Console.WriteLine("Handling XREAD command");
+
             List<string> streamNames = new List<string>();
             List<string> streamIds = new List<string>();
             int blockTime = -1; // Default to -1 (no blocking)
@@ -318,7 +322,8 @@ namespace codecrafters_redis.src
             if (blockTime != -1)
                 Thread.Sleep(blockTime);
 
-            (string simpleArrayResponse, bool hasEntries) = GenerateSimpleArrayResponseForStreams(streamNames, streamIds);
+            (string simpleArrayResponse, bool hasEntries) = GenerateSimpleArrayResponseForStreams(streamNames, streamIds, blockTime > 0);
+            Console.WriteLine("After Simple Response for Strems");
 
             if (blockTime == 0 && !hasEntries)
             {
@@ -332,19 +337,24 @@ namespace codecrafters_redis.src
                     stream.InfiniteWaiting = true;
                 }
 
-                return;
+                //return;
             }
+
+
 
             if (blockTime != -1 && !hasEntries)
             {
+                Console.WriteLine("Sending null response!");
                 SendResponse(ResponseHandler.NullResponse(), socket);
                 return;
             }
 
+            Console.WriteLine("Sending simple array response!");
             SendResponse(simpleArrayResponse, socket);
+            Console.WriteLine("Finish Handling XREAD command");
         }
 
-        private (string, bool) GenerateSimpleArrayResponseForStreams(List<string> streamNames, List<string> streamIds)
+        private (string, bool) GenerateSimpleArrayResponseForStreams(List<string> streamNames, List<string> streamIds, bool isSlept)
         {
             List<string> streamResponses = new List<string>();
             bool hasEntries = false;
@@ -356,8 +366,12 @@ namespace codecrafters_redis.src
 
                 RedisStream? stream = _streamStorage.GetStream(streamName);
 
-                if(startStreamId == "$")
+                if (startStreamId == "$")
+                {   
                     startStreamId = stream?.Entries.LastOrDefault()?.Id ?? "0-0"; // If "$" is provided, use the last entry ID or default to "0-0"
+                    if(!isSlept)
+                        Thread.Sleep(1000);
+                }
 
                 List<RedisStreamEntry> entries = (stream != null) ? stream.GetEntriesInRange(startStreamId, "+", false) : new List<RedisStreamEntry>();
                 List<string> responses = new List<string>();
