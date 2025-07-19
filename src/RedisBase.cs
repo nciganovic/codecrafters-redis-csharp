@@ -141,6 +141,11 @@ namespace codecrafters_redis.src
             }
         }
 
+        protected void HandleMultiCommand(RedisProtocolParser.RESPMessage command, Socket socket)
+        {
+            SendResponse(ResponseHandler.SimpleResponse(Constants.OK_RESPONSE), socket);
+        }
+
         protected virtual void HandleConfigComamnd(RedisProtocolParser.RESPMessage command, Socket socket)
         {
             var configToGet = command.GetConfigParameter();
@@ -482,6 +487,10 @@ namespace codecrafters_redis.src
 
                         case "INCR":
                             HandleIncrementCommand(command, socket);
+                            break;
+
+                        case "MULTI":
+                            HandleMultiCommand(command, socket);
                             break;
 
                         case "CONFIG":
