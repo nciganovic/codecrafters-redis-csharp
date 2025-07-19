@@ -130,7 +130,7 @@ namespace codecrafters_redis.src
                 }
                 else
                 {
-                    SendResponse(ResponseHandler.ErrorResponse("Value is not an integer"), socket);
+                    SendResponse(ResponseHandler.ErrorResponse("value is not an integer or out of range"), socket);
                 }
             }
             else
