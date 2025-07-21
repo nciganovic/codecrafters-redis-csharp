@@ -157,9 +157,15 @@ namespace codecrafters_redis.src
                 return;
             }
 
+            if (_redisTransactions.QueueLength == 0)
+            {
+                SendResponse(ResponseHandler.SimpleArrayResponse([]), socket);
+                return;
+            }
+
             _redisTransactions.Finish();
 
-            SendResponse(ResponseHandler.SimpleResponse(Constants.QUEUED_RESPONSE), socket);
+            //SendResponse(response, socket);
         }
 
         protected virtual void HandleConfigComamnd(RedisProtocolParser.RESPMessage command, Socket socket)

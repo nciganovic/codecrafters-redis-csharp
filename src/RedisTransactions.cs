@@ -9,6 +9,8 @@ namespace codecrafters_redis.src
         public bool IsInitialized { get; private set; }
         List<RESPMessage> comamnds = new List<RESPMessage>();
 
+        public int QueueLength => comamnds.Count;
+
         public void Begin()
         {
             IsInitialized = true;
