@@ -145,21 +145,21 @@ namespace codecrafters_redis.src
 
         protected void HandleMultiCommand(RedisProtocolParser.RESPMessage command, Socket socket)
         {
-            _redisTransactions.Begin();
+            _redisTransactions.Begin(socket);
             SendResponse(ResponseHandler.SimpleResponse(Constants.OK_RESPONSE), socket);
         }
 
         protected void HandleExecCommand(RedisProtocolParser.RESPMessage command, Socket socket)
         {
-            if (!_redisTransactions.IsInitialized)
+            if (!_redisTransactions.IsStarted(socket))
             {
                 SendResponse(ResponseHandler.ErrorResponse("EXEC without MULTI"), socket);
                 return;
             }
 
-            if (_redisTransactions.QueueLength == 0)
+            if (_redisTransactions.GetCommands(socket).Count() == 0)
             {
-                _redisTransactions.Finish();
+                _redisTransactions.Finish(socket);
                 SendResponse(ResponseHandler.SimpleArrayResponse([]), socket);
                 return;
             }
@@ -494,6 +494,13 @@ namespace codecrafters_redis.src
 
                 foreach (var command in commandsRecieved)
                 {
+                    if (_redisTransactions.IsStarted(socket) && command.command != "EXEC")
+                    {
+                        _redisTransactions.AddCommand(socket, command);
+                        SendResponse(ResponseHandler.SimpleResponse(Constants.QUEUED_RESPONSE), socket);
+                        continue;
+                    }
+
                     switch (command.command)
                     {
                         case "ECHO":

@@ -1,4 +1,5 @@
-﻿using static codecrafters_redis.src.RedisProtocolParser;
+﻿using System.Net.Sockets;
+using static codecrafters_redis.src.RedisProtocolParser;
 
 namespace codecrafters_redis.src
 {
@@ -6,26 +7,54 @@ namespace codecrafters_redis.src
 
     public class RedisTransactions
     {
-        public bool IsInitialized { get; private set; }
-        List<RESPMessage> comamnds = new List<RESPMessage>();
+        Dictionary<Socket, List<RESPMessage>> transactionsDict = new Dictionary<Socket, List<RESPMessage>>();
 
-        public int QueueLength => comamnds.Count;
-
-        public void Begin()
+        public void Begin(Socket socket)
         {
-            IsInitialized = true;
+            transactionsDict.Add(socket, []);
         }
 
-        public void AddCommand(RESPMessage command)
+        public bool IsStarted(Socket socket)
         {
-            comamnds.Add(command);
+            return transactionsDict.ContainsKey(socket);
         }
 
-        public void Finish()
+        public List<RESPMessage> GetCommands(Socket socket)
         {
-            // Code for execuing the transaction would go here.
-
-            IsInitialized = false;
+            if (transactionsDict.ContainsKey(socket))
+                return transactionsDict[socket];
+            else
+                throw new Exception("Transaction not started for this socket.");
         }
+
+        public void AddCommand(Socket socket, RESPMessage command)
+        {
+            if (transactionsDict.ContainsKey(socket))
+                transactionsDict[socket].Add(command);
+            else
+                transactionsDict.Add(socket, [command]);
+        }
+
+        public void AddCommands(Socket socket, List<RESPMessage> command)
+        {
+            if (transactionsDict.ContainsKey(socket))
+                transactionsDict[socket].AddRange(command);
+            else
+                transactionsDict.Add(socket, command);
+        }
+
+        public void Finish(Socket socket)
+        {
+            // Code for executing the transaction
+
+            transactionsDict.Remove(socket);
+        }
+    }
+
+    public record Transaction(Socket socket, List<RESPMessage> commands)
+    { 
+        public bool IsInitialized { get; private set; } = false;
+        public Socket Socket { get; private set; } = socket;
+        public List<RESPMessage> Commands { get; private set; } = new List<RESPMessage>(commands);
     }
 }
