@@ -258,7 +258,7 @@ namespace codecrafters_redis.src
             }
             else
             {
-                // If the stream is not in infinite waiting mode, we just send the response
+                //If the stream is not in infinite waiting mode, we just send the response
                 SendResponse(ResponseHandler.BulkResponse(redisStreamEntry.Id), socket);
             }
         }
