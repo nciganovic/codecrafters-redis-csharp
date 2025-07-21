@@ -28,6 +28,7 @@ namespace codecrafters_redis.src
         protected string? _dbfilename;
         protected RDSFileReader _reader;
         protected string _role;
+        protected RedisTransactions _redisTransactions;
 
         public RedisServer(string? dir, string? dbName, int port, string role)
         {
@@ -39,6 +40,7 @@ namespace codecrafters_redis.src
             _dbfilename = dbName;
             _reader = new RDSFileReader(_directory + "/" + _dbfilename);
             _role = role;
+            _redisTransactions = new RedisTransactions();
         }
 
 
@@ -143,7 +145,21 @@ namespace codecrafters_redis.src
 
         protected void HandleMultiCommand(RedisProtocolParser.RESPMessage command, Socket socket)
         {
+            _redisTransactions.Begin();
             SendResponse(ResponseHandler.SimpleResponse(Constants.OK_RESPONSE), socket);
+        }
+
+        protected void HandleExecCommand(RedisProtocolParser.RESPMessage command, Socket socket)
+        {
+            if (!_redisTransactions.IsInitialized)
+            {
+                SendResponse(ResponseHandler.ErrorResponse("EXEC without MULTI"), socket);
+                return;
+            }
+
+            _redisTransactions.Finish();
+
+            SendResponse(ResponseHandler.SimpleResponse(Constants.QUEUED_RESPONSE), socket);
         }
 
         protected virtual void HandleConfigComamnd(RedisProtocolParser.RESPMessage command, Socket socket)
@@ -491,6 +507,10 @@ namespace codecrafters_redis.src
 
                         case "MULTI":
                             HandleMultiCommand(command, socket);
+                            break;
+
+                        case "EXEC":
+                            HandleExecCommand(command, socket);
                             break;
 
                         case "CONFIG":
