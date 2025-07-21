@@ -159,11 +159,12 @@ namespace codecrafters_redis.src
 
             if (_redisTransactions.QueueLength == 0)
             {
+                _redisTransactions.Finish();
                 SendResponse(ResponseHandler.SimpleArrayResponse([]), socket);
                 return;
             }
 
-            _redisTransactions.Finish();
+            //_redisTransactions.Finish();
 
             //SendResponse(response, socket);
         }
