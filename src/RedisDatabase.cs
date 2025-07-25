@@ -96,8 +96,6 @@ namespace codecrafters_redis.src
 
         public List<RedisStreamEntry> Entries = new List<RedisStreamEntry>();
 
-        public bool InfiniteWaiting { get; set; } = false;
-
         public List<RedisStreamEntry> GetEntriesInRange(string startStreamId, string endStreamId, bool inclusiveStart)
         {
             (long startTimestamp, int startSequence) = GetTimestampAndSequenceFromId(startStreamId);

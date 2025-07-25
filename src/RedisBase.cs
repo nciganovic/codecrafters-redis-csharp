@@ -2,8 +2,7 @@
 using System.Net.Sockets;
 using System.Net;
 using System.Text;
-using System.Text.RegularExpressions;
-using System.IO;
+using static codecrafters_redis.src.RedisProtocolParser;
 
 namespace codecrafters_redis.src
 {
@@ -18,7 +17,7 @@ namespace codecrafters_redis.src
 
     }
 
-    abstract class RedisServer : IRedisServer
+    public abstract class RedisServer : IRedisServer
     {
         protected int _listeningPort;
         protected TcpListener _server;
@@ -40,9 +39,8 @@ namespace codecrafters_redis.src
             _dbfilename = dbName;
             _reader = new RDSFileReader(_directory + "/" + _dbfilename);
             _role = role;
-            _redisTransactions = new RedisTransactions();
+            _redisTransactions = new RedisTransactions(this);
         }
-
 
         public virtual void StartServer()
         {
@@ -59,6 +57,84 @@ namespace codecrafters_redis.src
                 var socket = _server.AcceptSocket();
                 var thread = new Thread(() => _HandleClient(socket));
                 thread.Start();
+            }
+        }
+
+        public void HandleCommand(RESPMessage command, Socket socket)
+        {
+            switch (command.command)
+            {
+                case "ECHO":
+                    HandleEchoCommand(command, socket);
+                    break;
+
+                case "SET":
+                    HandleSetCommand(command, socket);
+                    break;
+
+                case "GET":
+                    HandleGetCommand(command, socket);
+                    break;
+
+                case "INCR":
+                    HandleIncrementCommand(command, socket);
+                    break;
+
+                case "MULTI":
+                    HandleMultiCommand(command, socket);
+                    break;
+
+                case "EXEC":
+                    HandleExecCommand(command, socket);
+                    break;
+
+                case "CONFIG":
+                    HandleConfigComamnd(command, socket);
+                    break;
+
+                case "KEYS":
+                    HandleKeysCommand(command, socket);
+                    break;
+
+                case "INFO":
+                    HandleInfoComamnd(command, socket);
+                    break;
+
+                case "REPLCONF":
+                    HandleReplconfCommand(command, socket);
+                    break;
+
+                case "PSYNC":
+                    HandlePsyncCommand(command, socket);
+                    break;
+
+                case "PING":
+                    HandlePingCommand(command, socket);
+                    break;
+
+                case "WAIT":
+                    HandleWaitCommand(command, socket);
+                    break;
+
+                case "TYPE":
+                    HandleTypeCommand(command, socket);
+                    break;
+
+                case "XADD":
+                    HandleStreamAddCommand(command, socket);
+                    break;
+
+                case "XRANGE":
+                    HandleStreamRangeCommand(command, socket);
+                    break;
+
+                case "XREAD":
+                    HandleStreamReadCommand(command, socket);
+                    break;
+
+                default:
+                    HandleUnrecognizedComamnd(socket);
+                    break;
             }
         }
 
@@ -145,28 +221,38 @@ namespace codecrafters_redis.src
 
         protected void HandleMultiCommand(RedisProtocolParser.RESPMessage command, Socket socket)
         {
-            _redisTransactions.Begin(socket);
             SendResponse(ResponseHandler.SimpleResponse(Constants.OK_RESPONSE), socket);
+            _redisTransactions.InitalizeTransaction(socket);
         }
 
         protected void HandleExecCommand(RedisProtocolParser.RESPMessage command, Socket socket)
         {
-            if (!_redisTransactions.IsStarted(socket))
+            Transaction transaction = _redisTransactions.GetTransaction(socket)!;
+
+            if (transaction == null)
             {
                 SendResponse(ResponseHandler.ErrorResponse("EXEC without MULTI"), socket);
                 return;
             }
 
+            /*
             if (_redisTransactions.GetCommands(socket).Count() == 0)
             {
-                _redisTransactions.Finish(socket);
+                _redisTransactions.RemoveTransaction(socket);
                 SendResponse(ResponseHandler.SimpleArrayResponse([]), socket);
                 return;
+            }*/
+
+            foreach (var execCommand in transaction.Commands)
+            {
+                HandleCommand(execCommand, socket);
             }
 
-            //_redisTransactions.Finish();
+            transaction.Stop();
 
-            //SendResponse(response, socket);
+            SendResponse(ResponseHandler.SimpleArrayResponse(transaction.Responses.ToArray()), socket);
+
+            _redisTransactions.RemoveTransaction(socket);
         }
 
         protected virtual void HandleConfigComamnd(RedisProtocolParser.RESPMessage command, Socket socket)
@@ -247,20 +333,7 @@ namespace codecrafters_redis.src
 
             _streamStorage.AddEntryToStream(streamName, redisStreamEntry);
 
-            //SendResponse(ResponseHandler.BulkResponse(redisStreamEntry.Id), socket);
-
-            if (redisStream.InfiniteWaiting)
-            {
-                (string response, _) = GenerateSimpleArrayResponseForStreams([streamName], [previousEntryId], false);
-                SendResponse(response, socket);
-                redisStream.InfiniteWaiting = false;
-                return;
-            }
-            else
-            {
-                //If the stream is not in infinite waiting mode, we just send the response
-                SendResponse(ResponseHandler.BulkResponse(redisStreamEntry.Id), socket);
-            }
+            SendResponse(ResponseHandler.BulkResponse(redisStreamEntry.Id), socket);
         }
 
         private bool IsStreamEntryValid(Socket socket, RedisStream stream, string entryId)
@@ -354,6 +427,7 @@ namespace codecrafters_redis.src
 
         protected void HandleStreamReadCommand(RedisProtocolParser.RESPMessage command, Socket socket)
         {
+            
             List<string> streamNames = new List<string>();
             List<string> streamIds = new List<string>();
             int blockTime = -1; // Default to -1 (no blocking)
@@ -371,30 +445,44 @@ namespace codecrafters_redis.src
                 if (arg.ToUpper() == "STREAMS")
                     continue;
 
-                if (arg == "$" || RedisStream.IsStreamFormatValid(arg))
+                //Convert "$" to lastest stram ID
+                if (arg == "$")
+                {
+                    string latestID = _streamStorage.GetStream(streamNames[streamIds.Count])?.Entries.LastOrDefault()?.Id ?? "0-0";
+                    streamIds.Add(latestID);
+                    continue;
+                }
+
+                if (RedisStream.IsStreamFormatValid(arg))
                     streamIds.Add(arg); // This is a stream ID
                 else
                     streamNames.Add(arg); // This is a stream name
             }
 
-            if (blockTime != -1)
-                Thread.Sleep(blockTime);
+            //if (blockTime != -1)
+            //   Thread.Sleep(blockTime);
 
-            (string simpleArrayResponse, bool hasEntries) = GenerateSimpleArrayResponseForStreams(streamNames, streamIds, blockTime > 0);
+            (string simpleArrayResponse, bool hasEntries) = GenerateSimpleArrayResponseForStreams(streamNames, streamIds);
 
-            if (blockTime == 0 && !hasEntries)
+            if (blockTime == -1)
             {
-                foreach (string streamName in streamNames)
-                {
-                    RedisStream? stream = _streamStorage.GetStream(streamName);
-
-                    if (stream == null)
-                        continue;
-
-                    stream.InfiniteWaiting = true;
-                }
+                SendResponse(simpleArrayResponse, socket);
+                return;
             }
 
+            var stopwatch = System.Diagnostics.Stopwatch.StartNew();
+
+            while (blockTime == 0 || stopwatch.ElapsedMilliseconds <= blockTime)
+            {
+                // Check if any of the streams have entries
+                (simpleArrayResponse, hasEntries) = GenerateSimpleArrayResponseForStreams(streamNames, streamIds);
+
+                if (hasEntries)
+                    break;
+
+                //Thread.Sleep(100); // Sleep for a short time before checking again
+            }
+            
             if (blockTime != -1 && !hasEntries)
             {
                 SendResponse(ResponseHandler.NullResponse(), socket);
@@ -404,7 +492,7 @@ namespace codecrafters_redis.src
             SendResponse(simpleArrayResponse, socket);
         }
 
-        private (string, bool) GenerateSimpleArrayResponseForStreams(List<string> streamNames, List<string> streamIds, bool isSlept)
+        private (string, bool) GenerateSimpleArrayResponseForStreams(List<string> streamNames, List<string> streamIds)
         {
             List<string> streamResponses = new List<string>();
             bool hasEntries = false;
@@ -416,12 +504,12 @@ namespace codecrafters_redis.src
 
                 RedisStream? stream = _streamStorage.GetStream(streamName);
 
-                if (startStreamId == "$")
-                {   
-                    startStreamId = stream?.Entries.LastOrDefault()?.Id ?? "0-0"; // If "$" is provided, use the last entry ID or default to "0-0"
-                    if(!isSlept)
-                        Thread.Sleep(1000);
-                }
+                //if (startStreamId == "$")
+                //{   
+                //    startStreamId = stream?.Entries.LastOrDefault()?.Id ?? "0-0"; // If "$" is provided, use the last entry ID or default to "0-0"
+                //    if(!isSlept)
+                //        Thread.Sleep(1000);
+                //}
 
                 List<RedisStreamEntry> entries = (stream != null) ? stream.GetEntriesInRange(startStreamId, "+", false) : new List<RedisStreamEntry>();
                 List<string> responses = new List<string>();
@@ -494,93 +582,27 @@ namespace codecrafters_redis.src
 
                 foreach (var command in commandsRecieved)
                 {
-                    if (_redisTransactions.IsStarted(socket) && command.command != "EXEC")
+                    if (_redisTransactions.IsTransactionRunning(socket) && command.command != "EXEC")
                     {
                         _redisTransactions.AddCommand(socket, command);
                         SendResponse(ResponseHandler.SimpleResponse(Constants.QUEUED_RESPONSE), socket);
                         continue;
                     }
 
-                    switch (command.command)
-                    {
-                        case "ECHO":
-                            HandleEchoCommand(command, socket);
-                            break;
-
-                        case "SET":
-                            HandleSetCommand(command, socket);
-                            break;
-
-                        case "GET":
-                            HandleGetCommand(command, socket);
-                            break;
-
-                        case "INCR":
-                            HandleIncrementCommand(command, socket);
-                            break;
-
-                        case "MULTI":
-                            HandleMultiCommand(command, socket);
-                            break;
-
-                        case "EXEC":
-                            HandleExecCommand(command, socket);
-                            break;
-
-                        case "CONFIG":
-                            HandleConfigComamnd(command, socket);
-                            break;
-
-                        case "KEYS":
-                            HandleKeysCommand(command, socket);
-                            break;
-
-                        case "INFO":
-                            HandleInfoComamnd(command, socket);
-                            break;
-
-                        case "REPLCONF":
-                            HandleReplconfCommand(command, socket);
-                            break;
-
-                        case "PSYNC":
-                            HandlePsyncCommand(command, socket);
-                            break;
-
-                        case "PING":
-                            HandlePingCommand(command, socket);  
-                            break;
-
-                        case "WAIT":
-                            HandleWaitCommand(command, socket);
-                            break;
-
-                        case "TYPE":
-                            HandleTypeCommand(command, socket);
-                            break;
-
-                        case "XADD":
-                            HandleStreamAddCommand(command, socket);
-                            break;
-
-                        case "XRANGE":
-                            HandleStreamRangeCommand(command, socket);
-                            break;
-
-                        case "XREAD":
-                            HandleStreamReadCommand(command, socket);
-                            break;
-
-                        default:
-                            HandleUnrecognizedComamnd(socket);
-                            break;
-                    }
+                    HandleCommand(command, socket);
                 }
             }
         }
 
         protected void SendResponse(string response, Socket socket)
         {
+            if(_redisTransactions.IsTransactionRunning(socket) && response != ResponseHandler.SimpleResponse(Constants.QUEUED_RESPONSE))
+            {
+                //Only allow QUEUED response to be sent if we are in a transaction
+                _redisTransactions.AddResponse(socket, response);
+                return;
+            }
+
             byte[] encodedResponse = Encoding.UTF8.GetBytes(response);
             socket.Send(encodedResponse);
         }

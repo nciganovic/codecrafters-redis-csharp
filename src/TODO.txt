@@ -45,14 +45,15 @@ echo -ne "*2\r\n\$4\r\nTYPE\r\n\$4\r\ntest\r\n" | nc localhost 6379
 XADD 
 echo -ne "*5\r\n\$4\r\nXADD\r\n\$4\r\nst_1\r\n\$1\r\n1\r\n\$3\r\nfoo\r\n\$3\r\nbar" | nc localhost 6379
 
-echo -ne "*7\r\n\$4\r\nXADD\r\n\$8\r\nsome_key\r\n\$15\r\n1526985054069-0\r\n\$11\r\ntemperature\r\n\$2\r\n36\r\n\$8\r\nhumidity\r\n\$2\r\n95\r\n" | nc localhost 6379
+echo -ne "*7\r\n\$4\r\nXADD\r\n\$8\r\nsome_key\r\n\$3\r\n0-1\r\n\$11\r\ntemperature\r\n\$2\r\n36\r\n\$8\r\nhumidity\r\n\$2\r\n95\r\n" | nc localhost 6379
+echo -ne "*7\r\n\$4\r\nXADD\r\n\$8\r\nsome_key\r\n\$3\r\n0-2\r\n\$11\r\ntemperature\r\n\$2\r\n36\r\n\$8\r\nhumidity\r\n\$2\r\n95\r\n" | nc localhost 6379
 echo -ne "*7\r\n\$4\r\nXADD\r\n\$8\r\nsome_key\r\n\$15\r\n1526985054079-0\r\n\$11\r\ntemperature\r\n\$2\r\n37\r\n\$8\r\nhumidity\r\n\$2\r\n94\r\n" | nc localhost 6379
 
 XRANGE
 echo -ne "*4\r\n\$6\r\nXRANGE\r\n\$8\r\nsome_key\r\n\$13\r\n1526985054069\r\n\$13\r\n1526985054079\r\n" | nc localhost 6379
 
 XREAD 
-echo -ne "*6\r\n\$5\r\nXREAD\r\n\$5\r\nblock\r\n\$4\r\n1000\r\n\$7\r\nstreams\r\n\$8\r\nsome_key\r\n\$3\r\n0-1\r\n" | nc localhost 6379
+echo -ne "*6\r\n\$5\r\nXREAD\r\n\$5\r\nblock\r\n\$5\r\n10000\r\n\$7\r\nstreams\r\n\$8\r\nsome_key\r\n\$3\r\n0-2\r\n" | nc localhost 6379
 echo -ne "*6\r\n\$5\r\nXREAD\r\n\$5\r\nblock\r\n\$1\r\n0\r\n\$7\r\nstreams\r\n\$8\r\nsome_key\r\n\$3\r\n0-1\r\n" | nc localhost 6379
 
 Running another instance of Redis server

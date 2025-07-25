@@ -1,60 +1,71 @@
-﻿using System.Net.Sockets;
+﻿using System.Collections.Generic;
+using System.Net.Sockets;
+using System.Runtime.CompilerServices;
 using static codecrafters_redis.src.RedisProtocolParser;
 
 namespace codecrafters_redis.src
 {
-
-
-    public class RedisTransactions
+    public record Transaction(Socket socket)
     {
-        Dictionary<Socket, List<RESPMessage>> transactionsDict = new Dictionary<Socket, List<RESPMessage>>();
+        public bool IsStarted = false;
+        public Socket Socket = socket;
+        public List<RESPMessage> Commands = new List<RESPMessage>();
+        public List<string> Responses = new List<string>();
 
-        public void Begin(Socket socket)
+        public void Start()
         {
-            transactionsDict.Add(socket, []);
+            IsStarted = true;
         }
 
-        public bool IsStarted(Socket socket)
+        public void Stop()
         {
-            return transactionsDict.ContainsKey(socket);
+            IsStarted = false;
+        }
+    }
+
+    public class RedisTransactions(RedisServer redisServer)
+    {
+        private RedisServer redisServer = redisServer;
+        List<Transaction> transactions = new List<Transaction>();
+
+        public void InitalizeTransaction(Socket socket)
+        {
+            Transaction t = new Transaction(socket);
+            t.Start();
+            if (!transactions.Contains(t))
+                transactions.Add(t);
         }
 
-        public List<RESPMessage> GetCommands(Socket socket)
+        public Transaction? GetTransaction(Socket socket)
         {
-            if (transactionsDict.ContainsKey(socket))
-                return transactionsDict[socket];
-            else
-                throw new Exception("Transaction not started for this socket.");
+            return transactions.FirstOrDefault(x => x.Socket == socket);
+        }
+
+
+        public bool IsTransactionRunning(Socket socket)
+        {
+            return GetTransaction(socket)?.IsStarted ?? false;
         }
 
         public void AddCommand(Socket socket, RESPMessage command)
         {
-            if (transactionsDict.ContainsKey(socket))
-                transactionsDict[socket].Add(command);
-            else
-                transactionsDict.Add(socket, [command]);
+            Transaction? transaction = GetTransaction(socket);
+            if (transaction != null)
+                transaction.Commands.Add(command);
         }
 
-        public void AddCommands(Socket socket, List<RESPMessage> command)
+        public void RemoveTransaction(Socket socket)
         {
-            if (transactionsDict.ContainsKey(socket))
-                transactionsDict[socket].AddRange(command);
-            else
-                transactionsDict.Add(socket, command);
+            transactions.RemoveAll(t => t.Socket == socket);
         }
 
-        public void Finish(Socket socket)
+        public void AddResponse(Socket socket, string response)
         {
-            // Code for executing the transaction
-
-            transactionsDict.Remove(socket);
+            Transaction? transaction = GetTransaction(socket);
+            if (transaction != null)
+                transaction.Responses.Add(response);
+            else
+                throw new Exception("Transaction not started for this socket.");
         }
-    }
-
-    public record Transaction(Socket socket, List<RESPMessage> commands)
-    { 
-        public bool IsInitialized { get; private set; } = false;
-        public Socket Socket { get; private set; } = socket;
-        public List<RESPMessage> Commands { get; private set; } = new List<RESPMessage>(commands);
     }
 }
