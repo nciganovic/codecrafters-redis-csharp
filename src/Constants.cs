@@ -9,6 +9,7 @@
         public const string SPACE_SING = "\r\n";
         //public const string PING_RESPONSE = "PONG";
         public const string OK_RESPONSE = "OK";
+        public const string DISCARD_RESPONSE = "DISCARD";
         public const string QUEUED_RESPONSE = "QUEUED";
         public const string NULL_RESPONSE = "-1";
         public const string PX = "PX";

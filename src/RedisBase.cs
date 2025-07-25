@@ -88,6 +88,10 @@ namespace codecrafters_redis.src
                     HandleExecCommand(command, socket);
                     break;
 
+                case "DISCARD":
+                    HandleDiscardCommand(command, socket);
+                    break;
+
                 case "CONFIG":
                     HandleConfigComamnd(command, socket);
                     break;
@@ -235,14 +239,6 @@ namespace codecrafters_redis.src
                 return;
             }
 
-            /*
-            if (_redisTransactions.GetCommands(socket).Count() == 0)
-            {
-                _redisTransactions.RemoveTransaction(socket);
-                SendResponse(ResponseHandler.SimpleArrayResponse([]), socket);
-                return;
-            }*/
-
             foreach (var execCommand in transaction.Commands)
             {
                 HandleCommand(execCommand, socket);
@@ -253,6 +249,18 @@ namespace codecrafters_redis.src
             SendResponse(ResponseHandler.SimpleArrayResponse(transaction.Responses.ToArray()), socket);
 
             _redisTransactions.RemoveTransaction(socket);
+        }
+
+        protected void HandleDiscardCommand(RedisProtocolParser.RESPMessage command, Socket socket)
+        {
+            if(!_redisTransactions.IsTransactionRunning(socket))
+            {
+                SendResponse(ResponseHandler.ErrorResponse("DISCARD without MULTI"), socket);
+                return;
+            }
+
+            _redisTransactions.RemoveTransaction(socket);
+            SendResponse(ResponseHandler.SimpleResponse(Constants.OK_RESPONSE), socket);
         }
 
         protected virtual void HandleConfigComamnd(RedisProtocolParser.RESPMessage command, Socket socket)
@@ -582,7 +590,7 @@ namespace codecrafters_redis.src
 
                 foreach (var command in commandsRecieved)
                 {
-                    if (_redisTransactions.IsTransactionRunning(socket) && command.command != "EXEC")
+                    if (_redisTransactions.IsTransactionRunning(socket) && command.command != "EXEC" && command.command != "DISCARD")
                     {
                         _redisTransactions.AddCommand(socket, command);
                         SendResponse(ResponseHandler.SimpleResponse(Constants.QUEUED_RESPONSE), socket);
