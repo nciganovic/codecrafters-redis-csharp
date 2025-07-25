@@ -511,7 +511,7 @@ namespace codecrafters_redis.src
                 //        Thread.Sleep(1000);
                 //}
 
-                List<RedisStreamEntry> entries = (stream != null) ? stream.GetEntriesInRange(startStreamId, "+", false) : new List<RedisStreamEntry>();
+                List<RedisStreamEntry> entries = stream?.GetEntriesInRange(startStreamId, "+", false) ?? new List<RedisStreamEntry>();
                 List<string> responses = new List<string>();
 
                 if(entries.Count > 0)
