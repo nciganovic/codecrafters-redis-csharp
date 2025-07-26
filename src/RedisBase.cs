@@ -28,6 +28,7 @@ namespace codecrafters_redis.src
         protected RDSFileReader _reader;
         protected string _role;
         protected RedisTransactions _redisTransactions;
+        protected Dictionary<string, List<string>> _redisList = new Dictionary<string, List<string>>();
 
         public RedisServer(string? dir, string? dbName, int port, string role)
         {
@@ -134,6 +135,10 @@ namespace codecrafters_redis.src
 
                 case "XREAD":
                     HandleStreamReadCommand(command, socket);
+                    break;
+
+                case "RPUSH":
+                    HandlePushCommand(command, socket);
                     break;
 
                 default:
@@ -498,6 +503,23 @@ namespace codecrafters_redis.src
             }
 
             SendResponse(simpleArrayResponse, socket);
+        }
+
+        protected void HandlePushCommand(RedisProtocolParser.RESPMessage command, Socket socket)
+        {
+            var listName = command.GetKey();
+            var valueToPush = command.arguments[2];
+
+            if(_redisList.ContainsKey(listName))
+            {
+                _redisList[listName].Add(valueToPush);
+            }
+            else
+            {
+                _redisList.Add(listName, [valueToPush]);
+            }
+
+            SendResponse(ResponseHandler.IntegerResponse(_redisList[listName].Count()), socket);
         }
 
         private (string, bool) GenerateSimpleArrayResponseForStreams(List<string> streamNames, List<string> streamIds)
