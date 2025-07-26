@@ -508,15 +508,15 @@ namespace codecrafters_redis.src
         protected void HandlePushCommand(RedisProtocolParser.RESPMessage command, Socket socket)
         {
             var listName = command.GetKey();
-            var valueToPush = command.arguments[2];
+            List<string> valueToPush = command.arguments[2..(command.arguments.Count - 1)];
 
             if(_redisList.ContainsKey(listName))
             {
-                _redisList[listName].Add(valueToPush);
+                _redisList[listName].AddRange(valueToPush);
             }
             else
             {
-                _redisList.Add(listName, [valueToPush]);
+                _redisList.Add(listName, valueToPush);
             }
 
             SendResponse(ResponseHandler.IntegerResponse(_redisList[listName].Count()), socket);
