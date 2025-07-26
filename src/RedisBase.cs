@@ -508,7 +508,7 @@ namespace codecrafters_redis.src
         protected void HandlePushCommand(RedisProtocolParser.RESPMessage command, Socket socket)
         {
             var listName = command.GetKey();
-            List<string> valueToPush = command.arguments[2..(command.arguments.Count - 1)];
+            List<string> valueToPush = command.arguments[2..];
 
             if(_redisList.ContainsKey(listName))
             {
