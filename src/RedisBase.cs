@@ -604,12 +604,12 @@ namespace codecrafters_redis.src
 
             if (item == null)
             {
-                await SendResponse(ResponseHandler.NullResponse(), socket);
+                await SendResponse(ResponseHandler.NullResponse(), waitingSocket);
                 return;
             }
 
             _redisList[listName].Remove(item);
-            await SendResponse(ResponseHandler.ArrayResponse([listName, item]), socket);
+            await SendResponse(ResponseHandler.ArrayResponse([listName, item]), waitingSocket);
         }
 
         private async Task WaitAndRespondeAsync(string listName, Socket socket, int waitTime)
