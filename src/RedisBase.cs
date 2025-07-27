@@ -597,9 +597,9 @@ namespace codecrafters_redis.src
             if (waitTime == 0)
                 waitTime = Timeout.Infinite;
 
-            var consumer = new Thread(async () => await WaitAndRespondeAsync(listName, socket, waitTime));
-            consumer.Start();
-            /*
+            //var consumer = new Thread(async () => await WaitAndRespondeAsync(listName, socket, waitTime));
+            //consumer.Start();
+            
             (string item, Socket waitingSocket) = redisWaitableItem.WaitForItem(waitTime, socket);
 
             if (item == null)
@@ -609,7 +609,7 @@ namespace codecrafters_redis.src
             }
 
             _redisList[listName].Remove(item);
-            await SendResponse(ResponseHandler.ArrayResponse([listName, item]), socket);*/
+            await SendResponse(ResponseHandler.ArrayResponse([listName, item]), socket);
         }
 
         private async Task WaitAndRespondeAsync(string listName, Socket socket, int waitTime)
