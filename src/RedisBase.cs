@@ -593,7 +593,6 @@ namespace codecrafters_redis.src
                     string[] itemsToPop = _redisList[listName].Take(popCount).ToArray();
                     if (itemsToPop.Length > 0)
                     {
-                        Console.WriteLine($"Found {itemsToPop.Length} items to pop from list '{listName}'");
                         popedItems.AddRange(itemsToPop);
                         _redisList[listName].RemoveRange(0, popCount);
                         foundItem = true;
