@@ -21,13 +21,13 @@ namespace codecrafters_redis.src
 
         public override void StartServer()
         {
-            var handshakeThread = new Thread(() => _SendHandshakeToMaster());
+            var handshakeThread = new Thread(async () => await _SendHandshakeToMaster());
             handshakeThread.Start();
 
             base.StartServer();
         }
 
-        protected override void HandleSetCommand(RedisProtocolParser.RESPMessage command, Socket socket)
+        protected override async Task HandleSetCommand(RedisProtocolParser.RESPMessage command, Socket socket)
         {
             double? millisecondsToExpire = command.GetExpiry();
 
@@ -45,23 +45,23 @@ namespace codecrafters_redis.src
                 return;
             }
 
-            SendResponse(ResponseHandler.SimpleResponse(Constants.OK_RESPONSE), socket);
+            await SendResponse(ResponseHandler.SimpleResponse(Constants.OK_RESPONSE), socket);
         }
 
-        protected override void HandleKeysCommand(RedisProtocolParser.RESPMessage command, Socket socket)
+        protected override async Task HandleKeysCommand(RedisProtocolParser.RESPMessage command, Socket socket)
         {
-            HandleUnrecognizedComamnd(socket);
+           await HandleUnrecognizedComamnd(socket);
         }
 
         protected override string GenerateBulkStringForInfoComamnd() => $"role:slave\r\n";
 
-        protected override void HandleReplconfCommand(RedisProtocolParser.RESPMessage command, Socket socket)
+        protected override async Task HandleReplconfCommand(RedisProtocolParser.RESPMessage command, Socket socket)
         {
             var firstArg = command.arguments[1];
 
             if (firstArg == "GETACK")
             {
-                SendResponse(ResponseHandler.ArrayResponse(["REPLCONF", "ACK", _followerOffset.ToString()]), socket);
+                await SendResponse(ResponseHandler.ArrayResponse(["REPLCONF", "ACK", _followerOffset.ToString()]), socket);
 
                 if (_CheckIfConnectionIsFromLeader(socket))
                 {
@@ -71,20 +71,20 @@ namespace codecrafters_redis.src
             }
             else if (firstArg == "capa")
             {
-                SendResponse(ResponseHandler.SimpleResponse(Constants.OK_RESPONSE), socket);
+                await SendResponse(ResponseHandler.SimpleResponse(Constants.OK_RESPONSE), socket);
             }
             else
             {
-                SendResponse(ResponseHandler.SimpleResponse(Constants.OK_RESPONSE), socket);
+                await SendResponse(ResponseHandler.SimpleResponse(Constants.OK_RESPONSE), socket);
             }
         }
 
-        protected override void HandlePsyncCommand(RedisProtocolParser.RESPMessage command, Socket socket)
+        protected override async Task HandlePsyncCommand(RedisProtocolParser.RESPMessage command, Socket socket)
         {
-            HandleUnrecognizedComamnd(socket);
+            await HandleUnrecognizedComamnd(socket);
         }
 
-        protected override void HandlePingCommand(RedisProtocolParser.RESPMessage command, Socket socket)
+        protected override async Task HandlePingCommand(RedisProtocolParser.RESPMessage command, Socket socket)
         {
             if (_CheckIfConnectionIsFromLeader(socket))
             {
@@ -93,16 +93,16 @@ namespace codecrafters_redis.src
             }
             else
             {
-                SendResponse(ResponseHandler.SimpleResponse(Constants.PONG), socket);
+                await SendResponse(ResponseHandler.SimpleResponse(Constants.PONG), socket);
             }
         }
 
-        protected override void HandleWaitCommand(RedisProtocolParser.RESPMessage command, Socket socket)
+        protected override async Task HandleWaitCommand(RedisProtocolParser.RESPMessage command, Socket socket)
         {
-            HandleUnrecognizedComamnd(socket);
+            await HandleUnrecognizedComamnd(socket);
         }
 
-        private void _SendHandshakeToMaster()
+        private async Task _SendHandshakeToMaster()
         {
             using var client = new TcpClient();
             var endpoint = _leaderIPEndpoint;
@@ -113,7 +113,7 @@ namespace codecrafters_redis.src
 
             // PING
             //var ping = "*1\r\n$4\r\nPING\r\n";
-            SendResponse(ResponseHandler.ArrayResponse([Constants.PING]), stream.Socket);
+            await SendResponse(ResponseHandler.ArrayResponse([Constants.PING]), stream.Socket);
 
             //+PONG\r\n
             stream.Read(response, 0, 7);
@@ -121,21 +121,21 @@ namespace codecrafters_redis.src
             //REPLCONF PART 1
             var listeningPort = _listeningPort.ToString();
             var listeningPortToSend = $"*3\r\n$8\r\nREPLCONF\r\n$14\r\nlistening-port\r\n${listeningPort.Length}\r\n{listeningPort}\r\n";
-            SendResponse(ResponseHandler.ArrayResponse(["REPLCONF", "listening-port", listeningPort]), stream.Socket);
+            await SendResponse(ResponseHandler.ArrayResponse(["REPLCONF", "listening-port", listeningPort]), stream.Socket);
 
             //+OK\r\n
             stream.Read(response, 6, 5);
 
             //REPLCONF PART 2
             //var capabilities = "*3\r\n$8\r\nREPLCONF\r\n$4\r\ncapa\r\n$6\r\npsync2\r\n";
-            SendResponse(ResponseHandler.ArrayResponse(["REPLCONF", "capa", "psync2"]), stream.Socket);
+            await SendResponse(ResponseHandler.ArrayResponse(["REPLCONF", "capa", "psync2"]), stream.Socket);
 
             //+OK\r\n
             stream.Read(response, 11, 5);
 
             //PSYNC
             //var psync = "*3\r\n$5\r\nPSYNC\r\n$1\r\n?\r\n$2\r\n-1\r\n";
-            SendResponse(ResponseHandler.ArrayResponse(["PSYNC", "?", "-1"]), stream.Socket);
+            await SendResponse(ResponseHandler.ArrayResponse(["PSYNC", "?", "-1"]), stream.Socket);
 
             //+FULLRESYNC 75cd7bc10c49047e0d163660f3b90625b1af31dc 0
 
@@ -146,7 +146,7 @@ namespace codecrafters_redis.src
 
             var setSocket = stream.Socket;
 
-            _HandleClient(setSocket);
+            await _HandleClient(setSocket);
         }
 
         private bool _CheckIfConnectionIsFromLeader(Socket connection) => connection.RemoteEndPoint.GetHashCode() == _leaderIPEndpoint.GetHashCode();

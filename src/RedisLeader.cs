@@ -20,7 +20,7 @@ namespace codecrafters_redis.src
             base.StartServer();
         }
 
-        protected override void HandleSetCommand(RedisProtocolParser.RESPMessage command, Socket socket)
+        protected override async Task HandleSetCommand(RedisProtocolParser.RESPMessage command, Socket socket)
         {
             double? millisecondsToExpire = command.GetExpiry();
 
@@ -29,12 +29,12 @@ namespace codecrafters_redis.src
             var value = command.GetValue();
             _storage.Set(key, new StoredValue(value, expiryArgAsDateTime));
 
-            _PropagateSetToReplicas(key, value);
+            await _PropagateSetToReplicas(key, value);
 
-            SendResponse(ResponseHandler.SimpleResponse(Constants.OK_RESPONSE), socket);
+            await SendResponse(ResponseHandler.SimpleResponse(Constants.OK_RESPONSE), socket);
         }
 
-        protected override void HandleKeysCommand(RedisProtocolParser.RESPMessage command, Socket socket)
+        protected override async Task HandleKeysCommand(RedisProtocolParser.RESPMessage command, Socket socket)
         {
             var keysParams = command.arguments[1];
             if (keysParams == Constants.ASTERISK_CHAR.ToString())
@@ -54,7 +54,7 @@ namespace codecrafters_redis.src
                     responseMiddle = $"{responseMiddle}{i}";
                 }
 
-                SendResponse($"*{keysArray.Count()}\r\n{responseMiddle}", socket);
+                await SendResponse($"*{keysArray.Count()}\r\n{responseMiddle}", socket);
             }
             else
             {
@@ -64,18 +64,18 @@ namespace codecrafters_redis.src
 
         protected override string GenerateBulkStringForInfoComamnd() => $"role:master\r\nmaster_repl_offset:{_leaderReplOffset}\r\nmaster_replid:{_leaderReplId}";
 
-        protected override void HandleReplconfCommand(RedisProtocolParser.RESPMessage command, Socket socket)
+        protected override async Task HandleReplconfCommand(RedisProtocolParser.RESPMessage command, Socket socket)
         {
             var firstArg = command.arguments[1];
 
             if (firstArg == "listening-port")
             {
                 _replicas.Add(socket);
-                SendResponse(ResponseHandler.SimpleResponse(Constants.OK_RESPONSE), socket);
+                await SendResponse(ResponseHandler.SimpleResponse(Constants.OK_RESPONSE), socket);
             }
             else if (firstArg == "capa")
             {
-                SendResponse(ResponseHandler.SimpleResponse(Constants.OK_RESPONSE), socket);
+                await SendResponse(ResponseHandler.SimpleResponse(Constants.OK_RESPONSE), socket);
             }
             else if (firstArg == "ACK")
             {
@@ -90,58 +90,58 @@ namespace codecrafters_redis.src
             }
             else
             {
-                SendResponse(ResponseHandler.SimpleResponse(Constants.OK_RESPONSE), socket);
+                await SendResponse(ResponseHandler.SimpleResponse(Constants.OK_RESPONSE), socket);
             }
         }
 
-        protected override void HandlePsyncCommand(RedisProtocolParser.RESPMessage command, Socket socket)
+        protected override async Task HandlePsyncCommand(RedisProtocolParser.RESPMessage command, Socket socket)
         {
-            SendResponse($"+FULLRESYNC {_leaderReplOffset} 0\r\n", socket);
+            await SendResponse($"+FULLRESYNC {_leaderReplOffset} 0\r\n", socket);
             string emptyRDBFile = "UkVESVMwMDEx+glyZWRpcy12ZXIFNy4yLjD6CnJlZGlzLWJpdHPAQPoFY3RpbWXCbQi8ZfoIdXNlZC1tZW3CsMQQAPoIYW9mLWJhc2XAAP/wbjv+wP9aog==";
             byte[] encodedFile = Convert.FromBase64String(emptyRDBFile);
-            SendResponse($"${encodedFile.Length}\r\n", socket);
+            await SendResponse($"${encodedFile.Length}\r\n", socket);
             socket.Send(encodedFile);
         }
 
-        protected override void HandlePingCommand(RedisProtocolParser.RESPMessage command, Socket socket)
+        protected override async Task HandlePingCommand(RedisProtocolParser.RESPMessage command, Socket socket)
         {
-            SendResponse(ResponseHandler.SimpleResponse(Constants.PONG), socket);
+           await SendResponse(ResponseHandler.SimpleResponse(Constants.PONG), socket);
         }
 
-        protected override void HandleWaitCommand(RedisProtocolParser.RESPMessage command, Socket socket)
+        protected override async Task HandleWaitCommand(RedisProtocolParser.RESPMessage command, Socket socket)
         {
             int minimumNoReplicas = Int32.Parse(command.arguments[1]);
             int timeoutFromCommand = Int32.Parse(command.arguments[2]);
 
             if (_replicas.Count == 0)
             {
-                SendResponse($":{_replicas.Count}\r\n", socket);
+                await SendResponse($":{_replicas.Count}\r\n", socket);
                 return;
             }
 
             if (_leaderReplOffset == 0)
             {
                 Thread.Sleep(timeoutFromCommand);
-                SendResponse($":{_replicas.Count}\r\n", socket);
+                await SendResponse($":{_replicas.Count}\r\n", socket);
                 return;
             }
 
             foreach (var replica in _replicas)
             {
                 replica.ReceiveTimeout = timeoutFromCommand;
-                SendResponse(ResponseHandler.ArrayResponse(["REPLCONF", "GETACK", "*"]), replica);
+                await SendResponse(ResponseHandler.ArrayResponse(["REPLCONF", "GETACK", "*"]), replica);
             }
 
             Thread.Sleep(timeoutFromCommand);
-            SendResponse($":{_inSyncReplicas.Count}\r\n", socket);
+            await SendResponse($":{_inSyncReplicas.Count}\r\n", socket);
         }
 
-        private void _PropagateSetToReplicas(string key, string value)
+        private async Task _PropagateSetToReplicas(string key, string value)
         {
             var setCommand = ResponseHandler.ArrayResponse(["SET", key, value]);
             foreach (var replica in _replicas)
             {
-                SendResponse(setCommand, replica);
+                await SendResponse(setCommand, replica);
             }
             // If a leader sends a set command to a replica, we track the bytes sent. 
             _leaderReplOffset += setCommand.Length;

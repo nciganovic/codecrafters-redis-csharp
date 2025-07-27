@@ -56,122 +56,122 @@ namespace codecrafters_redis.src
             while (true)
             {
                 var socket = _server.AcceptSocket();
-                var thread = new Thread(() => _HandleClient(socket));
+                var thread = new Thread(async () => await _HandleClient(socket));
                 thread.Start();
             }
         }
 
-        public void HandleCommand(RESPMessage command, Socket socket)
+        public async Task HandleCommand(RESPMessage command, Socket socket)
         {
             switch (command.command)
             {
                 case "ECHO":
-                    HandleEchoCommand(command, socket);
+                    await HandleEchoCommand(command, socket);
                     break;
 
                 case "SET":
-                    HandleSetCommand(command, socket);
+                    await HandleSetCommand(command, socket);
                     break;
 
                 case "GET":
-                    HandleGetCommand(command, socket);
+                    await HandleGetCommand(command, socket);
                     break;
 
                 case "INCR":
-                    HandleIncrementCommand(command, socket);
+                    await HandleIncrementCommand(command, socket);
                     break;
 
                 case "MULTI":
-                    HandleMultiCommand(command, socket);
+                    await HandleMultiCommand(command, socket);
                     break;
 
                 case "EXEC":
-                    HandleExecCommand(command, socket);
+                    await HandleExecCommand(command, socket);
                     break;
 
                 case "DISCARD":
-                    HandleDiscardCommand(command, socket);
+                    await HandleDiscardCommand(command, socket);
                     break;
 
                 case "CONFIG":
-                    HandleConfigComamnd(command, socket);
+                    await HandleConfigComamnd(command, socket);
                     break;
 
                 case "KEYS":
-                    HandleKeysCommand(command, socket);
+                    await HandleKeysCommand(command, socket);
                     break;
 
                 case "INFO":
-                    HandleInfoComamnd(command, socket);
+                    await HandleInfoComamnd(command, socket);
                     break;
 
                 case "REPLCONF":
-                    HandleReplconfCommand(command, socket);
+                    await HandleReplconfCommand(command, socket);
                     break;
 
                 case "PSYNC":
-                    HandlePsyncCommand(command, socket);
+                    await HandlePsyncCommand(command, socket);
                     break;
 
                 case "PING":
-                    HandlePingCommand(command, socket);
+                    await HandlePingCommand(command, socket);
                     break;
 
                 case "WAIT":
-                    HandleWaitCommand(command, socket);
+                    await HandleWaitCommand(command, socket);
                     break;
 
                 case "TYPE":
-                    HandleTypeCommand(command, socket);
+                    await HandleTypeCommand(command, socket);
                     break;
 
                 case "XADD":
-                    HandleStreamAddCommand(command, socket);
+                    await HandleStreamAddCommand(command, socket);
                     break;
 
                 case "XRANGE":
-                    HandleStreamRangeCommand(command, socket);
+                    await HandleStreamRangeCommand(command, socket);
                     break;
 
                 case "XREAD":
-                    HandleStreamReadCommand(command, socket);
+                    await HandleStreamReadCommand(command, socket);
                     break;
 
                 case "RPUSH":
-                    HandlePushCommand(command, socket);
+                    await HandlePushCommand(command, socket);
                     break;
 
                 case "LPUSH":
-                    HandlePushCommand(command, socket, true);
+                    await HandlePushCommand(command, socket, true);
                     break;
 
                 case "LLEN":
-                    HandleLLenCommand(command, socket);
+                    await HandleLLenCommand(command, socket);
                     break;
 
                 case "LPOP":
-                    HandleLPopCommand(command, socket);
+                    await HandleLPopCommand(command, socket);
                     break;
 
                 case "LRANGE":
-                    HandleRangeCommand(command, socket);
+                    await HandleRangeCommand(command, socket);
                     break;
 
                 default:
-                    HandleUnrecognizedComamnd(socket);
+                    await HandleUnrecognizedComamnd(socket);
                     break;
             }
         }
 
-        protected virtual void HandleEchoCommand(RedisProtocolParser.RESPMessage command, Socket socket)
+        protected virtual async Task HandleEchoCommand(RedisProtocolParser.RESPMessage command, Socket socket)
         {
             var commandToEcho = command.arguments[1];
-            SendResponse(ResponseHandler.BulkResponse(commandToEcho), socket);
+            await SendResponse(ResponseHandler.BulkResponse(commandToEcho), socket);
         }
 
-        protected virtual void HandleSetCommand(RedisProtocolParser.RESPMessage command, Socket socket) { }
+        protected virtual async Task HandleSetCommand(RedisProtocolParser.RESPMessage command, Socket socket) { }
 
-        protected virtual void HandleGetCommand(RedisProtocolParser.RESPMessage command, Socket socket)
+        protected virtual async Task HandleGetCommand(RedisProtocolParser.RESPMessage command, Socket socket)
         {
             var keyToRetrieve = command.GetKey();
 
@@ -190,21 +190,21 @@ namespace codecrafters_redis.src
                     {
 
                         _storage.Remove(keyToRetrieve);
-                        SendResponse(ResponseHandler.NullResponse(), socket);
+                        await SendResponse(ResponseHandler.NullResponse(), socket);
                         return;
 
                     }
                     // If not expired
                     else
                     {
-                        SendResponse(ResponseHandler.BulkResponse(retrievedValue.Value), socket);
+                        await SendResponse(ResponseHandler.BulkResponse(retrievedValue.Value), socket);
                         return;
                     }
                 }
                 //value not set with expiry
                 else
                 {
-                    SendResponse(ResponseHandler.BulkResponse(retrievedValue.Value), socket);
+                    await SendResponse(ResponseHandler.BulkResponse(retrievedValue.Value), socket);
                     return;
                 }
 
@@ -212,12 +212,12 @@ namespace codecrafters_redis.src
             // Key not set
             else
             {
-                SendResponse(ResponseHandler.NullResponse(), socket);
+                await SendResponse(ResponseHandler.NullResponse(), socket);
                 return;
             }
         }
 
-        protected void HandleIncrementCommand(RedisProtocolParser.RESPMessage command, Socket socket)
+        protected async Task HandleIncrementCommand(RedisProtocolParser.RESPMessage command, Socket socket)
         {
             string keyToIncrement = command.GetKey();
             StoredValue? retrievedValue = _storage.Get(keyToIncrement);
@@ -229,78 +229,78 @@ namespace codecrafters_redis.src
                     currentValue++;
                     retrievedValue.Value = currentValue.ToString();
                     _storage.Set(keyToIncrement, retrievedValue);
-                    SendResponse(ResponseHandler.IntegerResponse(currentValue), socket);
+                    await SendResponse(ResponseHandler.IntegerResponse(currentValue), socket);
                 }
                 else
                 {
-                    SendResponse(ResponseHandler.ErrorResponse("value is not an integer or out of range"), socket);
+                   await SendResponse(ResponseHandler.ErrorResponse("value is not an integer or out of range"), socket);
                 }
             }
             else
             {
                 // If key does not exist, set it to 1
                 _storage.Set(keyToIncrement, new StoredValue("1", null));
-                SendResponse(ResponseHandler.IntegerResponse(1), socket);
+                await SendResponse(ResponseHandler.IntegerResponse(1), socket);
             }
         }
 
-        protected void HandleMultiCommand(RedisProtocolParser.RESPMessage command, Socket socket)
+        protected async Task HandleMultiCommand(RedisProtocolParser.RESPMessage command, Socket socket)
         {
-            SendResponse(ResponseHandler.SimpleResponse(Constants.OK_RESPONSE), socket);
+            await SendResponse(ResponseHandler.SimpleResponse(Constants.OK_RESPONSE), socket);
             _redisTransactions.InitalizeTransaction(socket);
         }
 
-        protected void HandleExecCommand(RedisProtocolParser.RESPMessage command, Socket socket)
+        protected async Task HandleExecCommand(RedisProtocolParser.RESPMessage command, Socket socket)
         {
             Transaction transaction = _redisTransactions.GetTransaction(socket)!;
 
             if (transaction == null)
             {
-                SendResponse(ResponseHandler.ErrorResponse("EXEC without MULTI"), socket);
+                await SendResponse(ResponseHandler.ErrorResponse("EXEC without MULTI"), socket);
                 return;
             }
 
             foreach (var execCommand in transaction.Commands)
             {
-                HandleCommand(execCommand, socket);
+                await HandleCommand(execCommand, socket);
             }
 
             transaction.Stop();
 
-            SendResponse(ResponseHandler.SimpleArrayResponse(transaction.Responses.ToArray()), socket);
+            await SendResponse(ResponseHandler.SimpleArrayResponse(transaction.Responses.ToArray()), socket);
 
             _redisTransactions.RemoveTransaction(socket);
         }
 
-        protected void HandleDiscardCommand(RedisProtocolParser.RESPMessage command, Socket socket)
+        protected async Task HandleDiscardCommand(RedisProtocolParser.RESPMessage command, Socket socket)
         {
             if(!_redisTransactions.IsTransactionRunning(socket))
             {
-                SendResponse(ResponseHandler.ErrorResponse("DISCARD without MULTI"), socket);
+                await SendResponse(ResponseHandler.ErrorResponse("DISCARD without MULTI"), socket);
                 return;
             }
 
             _redisTransactions.RemoveTransaction(socket);
-            SendResponse(ResponseHandler.SimpleResponse(Constants.OK_RESPONSE), socket);
+            await SendResponse(ResponseHandler.SimpleResponse(Constants.OK_RESPONSE), socket);
         }
 
-        protected virtual void HandleConfigComamnd(RedisProtocolParser.RESPMessage command, Socket socket)
+        protected virtual async Task HandleConfigComamnd(RedisProtocolParser.RESPMessage command, Socket socket)
         {
             var configToGet = command.GetConfigParameter();
 
             if (configToGet == "dir")
             {
-                SendResponse(ResponseHandler.ArrayResponse([configToGet, _directory]), socket);
+                await SendResponse(ResponseHandler.ArrayResponse([configToGet, _directory]), socket);
             }
             else if (configToGet == "dbfilename")
             {
-                SendResponse(ResponseHandler.ArrayResponse([configToGet, _dbfilename]), socket);
+                await SendResponse(ResponseHandler.ArrayResponse([configToGet, _dbfilename]), socket);
             }
         }
 
-        protected virtual void HandleKeysCommand(RedisProtocolParser.RESPMessage command, Socket socket) { }
+        protected virtual async Task HandleKeysCommand(RedisProtocolParser.RESPMessage command, Socket socket) { }
 
-        protected void HandleInfoComamnd(RedisProtocolParser.RESPMessage command, Socket socket)
+        protected async Task HandleInfoComamnd(RedisProtocolParser.RESPMessage command, Socket socket)
         {
             var param = command.GetInfoParameter();
             if (param == "replication")
@@ -308,26 +308,26 @@ namespace codecrafters_redis.src
                 var bulkString = GenerateBulkStringForInfoComamnd();
                 var bulkStringLength = bulkString.Length;
 
-                SendResponse(ResponseHandler.BulkResponse(bulkString), socket);
+                await SendResponse(ResponseHandler.BulkResponse(bulkString), socket);
             }
             else
             {
                 Console.Out.WriteLine("INFO command param not supported");
-                SendResponse(ResponseHandler.NullResponse(), socket);
+                await SendResponse(ResponseHandler.NullResponse(), socket);
             }
         }
 
         protected abstract string GenerateBulkStringForInfoComamnd();
 
-        protected virtual void HandleReplconfCommand(RedisProtocolParser.RESPMessage command, Socket socket) { }
+        protected virtual async Task HandleReplconfCommand(RedisProtocolParser.RESPMessage command, Socket socket) { }
 
-        protected virtual void HandlePsyncCommand(RedisProtocolParser.RESPMessage command, Socket socket) { }
+        protected virtual async Task HandlePsyncCommand(RedisProtocolParser.RESPMessage command, Socket socket) { }
 
-        protected virtual void HandlePingCommand(RedisProtocolParser.RESPMessage command, Socket socket) { }
+        protected virtual async Task HandlePingCommand(RedisProtocolParser.RESPMessage command, Socket socket) { }
 
-        protected virtual void HandleWaitCommand(RedisProtocolParser.RESPMessage command, Socket socket) { }
+        protected virtual async Task HandleWaitCommand(RedisProtocolParser.RESPMessage command, Socket socket) { }
 
-        protected void HandleTypeCommand(RedisProtocolParser.RESPMessage command, Socket socket) 
+        protected async Task HandleTypeCommand(RedisProtocolParser.RESPMessage command, Socket socket) 
         {
             var keyToRetrieve = command.GetKey();
             StoredValue? retrievedValue = _storage.Get(keyToRetrieve);
@@ -336,10 +336,10 @@ namespace codecrafters_redis.src
             if (type == "none" && _streamStorage.GetStream(keyToRetrieve) != null)
                 type = "stream";
 
-            SendResponse(ResponseHandler.SimpleResponse(type), socket); 
+            await SendResponse(ResponseHandler.SimpleResponse(type), socket); 
         }
 
-        protected void HandleStreamAddCommand(RedisProtocolParser.RESPMessage command, Socket socket)
+        protected async Task HandleStreamAddCommand(RedisProtocolParser.RESPMessage command, Socket socket)
         {
             //Correct command is XADD stream_key stream_id property_name property_value
             var streamName = command.GetKey();
@@ -347,7 +347,7 @@ namespace codecrafters_redis.src
 
             RedisStream redisStream = _streamStorage.GetOrCreateStream(streamName);
 
-            if (!IsStreamEntryValid(socket, redisStream, streamId))
+            if (!await IsStreamEntryValid(socket, redisStream, streamId))
                 return;
 
             string previousEntryId = redisStream.Entries.LastOrDefault()?.Id ?? "0-0"; 
@@ -362,15 +362,15 @@ namespace codecrafters_redis.src
 
             _streamStorage.AddEntryToStream(streamName, redisStreamEntry);
 
-            SendResponse(ResponseHandler.BulkResponse(redisStreamEntry.Id), socket);
+            await SendResponse(ResponseHandler.BulkResponse(redisStreamEntry.Id), socket);
         }
 
-        private bool IsStreamEntryValid(Socket socket, RedisStream stream, string entryId)
+        private async Task<bool> IsStreamEntryValid(Socket socket, RedisStream stream, string entryId)
         {
             // Matches the format of stream ID like "123-456" or "123-*"
             if (entryId != "*" && !RedisStream.IsStreamFormatValid(entryId))
             {
-                SendResponse(ResponseHandler.ErrorResponse("The ID specified in XADD is invalid format"), socket);
+                await SendResponse(ResponseHandler.ErrorResponse("The ID specified in XADD is invalid format"), socket);
                 return false;
             }
 
@@ -385,7 +385,7 @@ namespace codecrafters_redis.src
                     RedisStreamEntry lastEntry = stream.Entries.Last();
                     if (lastEntry.CreatedAt > timestamp)
                     {
-                        SendResponse(ResponseHandler.ErrorResponse("The ID specified in XADD is equal or smaller than the target stream top item"), socket);
+                        await SendResponse(ResponseHandler.ErrorResponse("The ID specified in XADD is equal or smaller than the target stream top item"), socket);
                         return false;
                     }
                 }
@@ -397,7 +397,7 @@ namespace codecrafters_redis.src
 
                 if (timestamp == 0 && sequence == 0)
                 {
-                    SendResponse(ResponseHandler.ErrorResponse("The ID specified in XADD must be greater than 0-0"), socket);
+                    await SendResponse(ResponseHandler.ErrorResponse("The ID specified in XADD must be greater than 0-0"), socket);
                     return false;
                 }
 
@@ -406,7 +406,7 @@ namespace codecrafters_redis.src
                     RedisStreamEntry lastEntry = stream.Entries.Last();
                     if (lastEntry.CreatedAt > timestamp || (lastEntry.CreatedAt == timestamp && lastEntry.Sequence >= sequence))
                     {
-                        SendResponse(ResponseHandler.ErrorResponse("The ID specified in XADD is equal or smaller than the target stream top item"), socket);
+                        await SendResponse(ResponseHandler.ErrorResponse("The ID specified in XADD is equal or smaller than the target stream top item"), socket);
                         return false;
                     }
                 }
@@ -415,7 +415,7 @@ namespace codecrafters_redis.src
             return true;
         }
 
-        protected void HandleStreamRangeCommand(RedisProtocolParser.RESPMessage command, Socket socket)
+        protected async Task HandleStreamRangeCommand(RedisProtocolParser.RESPMessage command, Socket socket)
         {
             var streamName = command.GetKey();
             string startStreamId = command.arguments[2];
@@ -425,7 +425,7 @@ namespace codecrafters_redis.src
 
             if (stream == null)
             {
-                SendResponse(ResponseHandler.ErrorResponse($"Stream {streamName} does not exist."), socket);
+                await SendResponse(ResponseHandler.ErrorResponse($"Stream {streamName} does not exist."), socket);
                 return;
             }
 
@@ -451,10 +451,10 @@ namespace codecrafters_redis.src
                 responses.Add(totalEntryResponse);
             }
 
-            SendResponse(ResponseHandler.SimpleArrayResponse(responses.ToArray()), socket);
+            await SendResponse(ResponseHandler.SimpleArrayResponse(responses.ToArray()), socket);
         }
 
-        protected void HandleStreamReadCommand(RedisProtocolParser.RESPMessage command, Socket socket)
+        protected async Task HandleStreamReadCommand(RedisProtocolParser.RESPMessage command, Socket socket)
         {
             
             List<string> streamNames = new List<string>();
@@ -495,7 +495,7 @@ namespace codecrafters_redis.src
 
             if (blockTime == -1)
             {
-                SendResponse(simpleArrayResponse, socket);
+                await SendResponse(simpleArrayResponse, socket);
                 return;
             }
 
@@ -514,14 +514,14 @@ namespace codecrafters_redis.src
             
             if (blockTime != -1 && !hasEntries)
             {
-                SendResponse(ResponseHandler.NullResponse(), socket);
+                await SendResponse(ResponseHandler.NullResponse(), socket);
                 return;
             }
 
-            SendResponse(simpleArrayResponse, socket);
+            await SendResponse(simpleArrayResponse, socket);
         }
 
-        protected void HandlePushCommand(RedisProtocolParser.RESPMessage command, Socket socket, bool prepend = false)
+        protected async Task HandlePushCommand(RedisProtocolParser.RESPMessage command, Socket socket, bool prepend = false)
         {
             var listName = command.GetKey();
             List<string> valueToPush = command.arguments[2..];
@@ -541,19 +541,19 @@ namespace codecrafters_redis.src
                 _redisList.Add(listName, valueToPush);
             }
 
-            SendResponse(ResponseHandler.IntegerResponse(_redisList[listName].Count()), socket);
+            await SendResponse(ResponseHandler.IntegerResponse(_redisList[listName].Count()), socket);
         }
 
-        protected void HandleLLenCommand(RedisProtocolParser.RESPMessage command, Socket socket)
+        protected async Task HandleLLenCommand(RedisProtocolParser.RESPMessage command, Socket socket)
         {
             var listName = command.GetKey();
             
             int len = _redisList.ContainsKey(listName) ? _redisList[listName].Count : 0;    
 
-            SendResponse(ResponseHandler.IntegerResponse(len), socket);
+            await SendResponse(ResponseHandler.IntegerResponse(len), socket);
         }
 
-        protected void HandleLPopCommand(RedisProtocolParser.RESPMessage command, Socket socket)
+        protected async Task HandleLPopCommand(RedisProtocolParser.RESPMessage command, Socket socket)
         {
             var listName = command.GetKey();
             int popCount = 1; // Default pop count is 1
@@ -565,7 +565,7 @@ namespace codecrafters_redis.src
 
             if (!_redisList.ContainsKey(listName) || _redisList[listName].Count == 0)
             {
-                SendResponse(ResponseHandler.NullResponse(), socket);
+                await SendResponse(ResponseHandler.NullResponse(), socket);
                 return;
             }
 
@@ -574,18 +574,18 @@ namespace codecrafters_redis.src
             _redisList[listName].RemoveRange(0, popCount);
 
             if(items.Count() == 1)
-                SendResponse(ResponseHandler.SimpleResponse(items.First()), socket);
+                await SendResponse(ResponseHandler.SimpleResponse(items.First()), socket);
             else
-                SendResponse(ResponseHandler.ArrayResponse(items.ToArray()), socket);
+                await SendResponse(ResponseHandler.ArrayResponse(items.ToArray()), socket);
         }
 
-        protected void HandleRangeCommand(RedisProtocolParser.RESPMessage command, Socket socket)
+        protected async Task HandleRangeCommand(RedisProtocolParser.RESPMessage command, Socket socket)
         {
             var listName = command.GetKey();
 
             if (!int.TryParse(command.arguments[2], out int startIndex) || !int.TryParse(command.arguments[3], out int endIndex))
             {
-                SendResponse(ResponseHandler.ErrorResponse("Invalid range specified"), socket);
+                await SendResponse(ResponseHandler.ErrorResponse("Invalid range specified"), socket);
                 return;
             }
 
@@ -596,13 +596,13 @@ namespace codecrafters_redis.src
 
             if (!_redisList.ContainsKey(listName) || startIndex > endIndex)
             {
-                SendResponse(ResponseHandler.ArrayResponse([]), socket);
+                await SendResponse(ResponseHandler.ArrayResponse([]), socket);
                 return;
             }
 
             List<string> listValues = _redisList[listName].Skip(startIndex).Take(endIndex - startIndex + 1).ToList();
 
-            SendResponse(ResponseHandler.ArrayResponse(listValues.ToArray()), socket);
+            await SendResponse(ResponseHandler.ArrayResponse(listValues.ToArray()), socket);
         }
 
         private (string, bool) GenerateSimpleArrayResponseForStreams(List<string> streamNames, List<string> streamIds)
@@ -659,12 +659,12 @@ namespace codecrafters_redis.src
             return (ResponseHandler.SimpleArrayResponse(streamResponses.ToArray()), hasEntries);
         }
 
-        protected void HandleUnrecognizedComamnd(Socket socket)
+        protected async Task HandleUnrecognizedComamnd(Socket socket)
         {
-            SendResponse(ResponseHandler.NullResponse(), socket);
+            await SendResponse(ResponseHandler.NullResponse(), socket);
         }
 
-        protected virtual void _HandleClient(Socket socket)
+        protected virtual async Task _HandleClient(Socket socket)
         {
             while (socket.Connected)
             {
@@ -698,16 +698,16 @@ namespace codecrafters_redis.src
                     if (_redisTransactions.IsTransactionRunning(socket) && command.command != "EXEC" && command.command != "DISCARD")
                     {
                         _redisTransactions.AddCommand(socket, command);
-                        SendResponse(ResponseHandler.SimpleResponse(Constants.QUEUED_RESPONSE), socket);
+                        await SendResponse(ResponseHandler.SimpleResponse(Constants.QUEUED_RESPONSE), socket);
                         continue;
                     }
 
-                    HandleCommand(command, socket);
+                    await HandleCommand(command, socket);
                 }
             }
         }
 
-        protected void SendResponse(string response, Socket socket)
+        protected async Task SendResponse(string response, Socket socket)
         {
             if(_redisTransactions.IsTransactionRunning(socket) && response != ResponseHandler.SimpleResponse(Constants.QUEUED_RESPONSE))
             {
@@ -717,7 +717,7 @@ namespace codecrafters_redis.src
             }
 
             byte[] encodedResponse = Encoding.UTF8.GetBytes(response);
-            socket.Send(encodedResponse);
+            await socket.SendAsync(encodedResponse);
         }
 
         protected string? _DateAsString(double? milliSeconds)
