@@ -542,7 +542,7 @@ namespace codecrafters_redis.src
                 return;
             }
 
-            List<string> listValues = _redisList[listName].Skip(startIndex).Take(endIndex - startIndex).ToList();
+            List<string> listValues = _redisList[listName].Skip(startIndex).Take(endIndex - startIndex + 1).ToList();
 
             SendResponse(ResponseHandler.ArrayResponse(listValues.ToArray()), socket);
         }
