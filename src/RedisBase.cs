@@ -592,14 +592,16 @@ namespace codecrafters_redis.src
         protected async Task HandleBlockLPopComand(RedisProtocolParser.RESPMessage command, Socket socket)
         {
             var listName = command.GetKey();
-            int waitTime = Convert.ToInt32(command.arguments[2]);
+            decimal waitTimeDecimal = Convert.ToInt32(command.arguments[2]);
+            int waitTime = -1;
 
-            if (waitTime == 0)
-                waitTime = Timeout.Infinite;
+            // If waitTimeDecimal is  0 then we pass -1 as wait time as this is sign of ininfinite wait
+            if (waitTimeDecimal != 0) 
+                waitTime *= 1000; // Convert seconds to milliseconds
 
             //var consumer = new Thread(async () => await WaitAndRespondeAsync(listName, socket, waitTime));
             //consumer.Start();
-            
+
             (string item, Socket waitingSocket) = redisWaitableItem.WaitForItem(waitTime, socket);
 
             if (item == null)
