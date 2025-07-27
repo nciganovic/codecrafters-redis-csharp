@@ -141,6 +141,10 @@ namespace codecrafters_redis.src
                     HandlePushCommand(command, socket);
                     break;
 
+                case "LRANGE":
+                    HandleRangeCommand(command, socket);
+                    break;
+
                 default:
                     HandleUnrecognizedComamnd(socket);
                     break;
@@ -520,6 +524,27 @@ namespace codecrafters_redis.src
             }
 
             SendResponse(ResponseHandler.IntegerResponse(_redisList[listName].Count()), socket);
+        }
+        
+        protected void HandleRangeCommand(RedisProtocolParser.RESPMessage command, Socket socket)
+        {
+            var listName = command.GetKey();
+
+            if (!int.TryParse(command.arguments[2], out int startIndex) || !int.TryParse(command.arguments[3], out int endIndex))
+            {
+                SendResponse(ResponseHandler.ErrorResponse("Invalid range specified"), socket);
+                return;
+            }
+
+            if (!_redisList.ContainsKey(listName) || startIndex > endIndex)
+            {
+                SendResponse(ResponseHandler.ArrayResponse([]), socket);
+                return;
+            }
+
+            List<string> listValues = _redisList[listName].Skip(startIndex).Take(endIndex - startIndex).ToList();
+
+            SendResponse(ResponseHandler.ArrayResponse(listValues.ToArray()), socket);
         }
 
         private (string, bool) GenerateSimpleArrayResponseForStreams(List<string> streamNames, List<string> streamIds)
