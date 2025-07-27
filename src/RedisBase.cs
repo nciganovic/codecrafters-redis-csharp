@@ -581,6 +581,8 @@ namespace codecrafters_redis.src
             {
                 blockTime = Convert.ToInt64(command.arguments[command.arguments.Count() - 1]);
 
+                Console.WriteLine($"Blocking pop for {listName} with block time {blockTime} ms");
+
                 var stopwatch = System.Diagnostics.Stopwatch.StartNew();
                 bool foundItem = false;
                 List<string> popedItems = new List<string>();
@@ -588,11 +590,17 @@ namespace codecrafters_redis.src
                 while (blockTime == 0 || stopwatch.ElapsedMilliseconds <= blockTime)
                 {
                     if(!_redisList.ContainsKey(listName))
+                    {
+                        Console.WriteLine($"List '{listName}' does not exist, waiting for items to be added...");
+                        //await Task.Delay(100); // Wait before checking again
                         continue;
+                    }
 
+                    Console.WriteLine($"Checking for items in list '{listName}' to pop {popCount}...");
                     string[] itemsToPop = _redisList[listName].Take(popCount).ToArray();
                     if (itemsToPop.Length > 0)
                     {
+                        Console.WriteLine($"Found {itemsToPop.Length} items to pop from list '{listName}'");
                         popedItems.AddRange(itemsToPop);
                         _redisList[listName].RemoveRange(0, popCount);
                         foundItem = true;
