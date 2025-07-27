@@ -145,6 +145,10 @@ namespace codecrafters_redis.src
                     HandlePushCommand(command, socket, true);
                     break;
 
+                case "LLEN":
+                    HandleLLenCommand(command, socket);
+                    break;
+
                 case "LRANGE":
                     HandleRangeCommand(command, socket);
                     break;
@@ -534,6 +538,15 @@ namespace codecrafters_redis.src
             }
 
             SendResponse(ResponseHandler.IntegerResponse(_redisList[listName].Count()), socket);
+        }
+
+        protected void HandleLLenCommand(RedisProtocolParser.RESPMessage command, Socket socket)
+        {
+            var listName = command.GetKey();
+            
+            int len = _redisList.ContainsKey(listName) ? _redisList[listName].Count : 0;    
+
+            SendResponse(ResponseHandler.IntegerResponse(len), socket);
         }
 
         protected void HandleRangeCommand(RedisProtocolParser.RESPMessage command, Socket socket)
