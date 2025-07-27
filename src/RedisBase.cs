@@ -149,6 +149,10 @@ namespace codecrafters_redis.src
                     HandleLLenCommand(command, socket);
                     break;
 
+                case "LPOP":
+                    HandleLPopCommand(command, socket);
+                    break;
+
                 case "LRANGE":
                     HandleRangeCommand(command, socket);
                     break;
@@ -547,6 +551,32 @@ namespace codecrafters_redis.src
             int len = _redisList.ContainsKey(listName) ? _redisList[listName].Count : 0;    
 
             SendResponse(ResponseHandler.IntegerResponse(len), socket);
+        }
+
+        protected void HandleLPopCommand(RedisProtocolParser.RESPMessage command, Socket socket)
+        {
+            var listName = command.GetKey();
+            int popCount = 1; // Default pop count is 1
+
+            if (command.arguments.Count > 2 && int.TryParse(command.arguments[2], out int count))
+            {
+                popCount = count;
+            }
+
+            if (!_redisList.ContainsKey(listName) || _redisList[listName].Count == 0)
+            {
+                SendResponse(ResponseHandler.NullResponse(), socket);
+                return;
+            }
+
+            string[] items = _redisList[listName].Take(popCount).ToArray();
+
+            _redisList[listName].RemoveRange(0, popCount);
+
+            if(items.Count() == 1)
+                SendResponse(ResponseHandler.SimpleResponse(items.First()), socket);
+            else
+                SendResponse(ResponseHandler.ArrayResponse(items.ToArray()), socket);
         }
 
         protected void HandleRangeCommand(RedisProtocolParser.RESPMessage command, Socket socket)
