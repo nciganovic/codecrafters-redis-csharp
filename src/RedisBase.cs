@@ -29,6 +29,10 @@ namespace codecrafters_redis.src
         protected string _role;
         protected RedisTransactions _redisTransactions;
         protected Dictionary<string, List<string>> _redisList = new Dictionary<string, List<string>>();
+        private readonly object _lock = new object();
+        private readonly ManualResetEvent _itemAddedEvent = new ManualResetEvent(false);
+
+        private readonly WaitableQueue<string> redisWaitableItem = new();
 
         public RedisServer(string? dir, string? dbName, int port, string role)
         {
@@ -150,11 +154,11 @@ namespace codecrafters_redis.src
                     break;
 
                 case "LPOP":
-                    await HandleLPopCommand(command, socket, false);
+                    await HandleLPopCommand(command, socket);
                     break;
 
                 case "BLPOP":
-                    await HandleLPopCommand(command, socket, true);
+                    await HandleBlockLPopComand(command, socket);
                     break;
 
                 case "LRANGE":
@@ -545,6 +549,8 @@ namespace codecrafters_redis.src
                 _redisList.Add(listName, valueToPush);
             }
 
+            redisWaitableItem.Enqueue(valueToPush.First());
+
             await SendResponse(ResponseHandler.IntegerResponse(_redisList[listName].Count()), socket);
         }
 
@@ -557,64 +563,19 @@ namespace codecrafters_redis.src
             await SendResponse(ResponseHandler.IntegerResponse(len), socket);
         }
 
-        protected async Task HandleLPopCommand(RedisProtocolParser.RESPMessage command, Socket socket, bool hasBlock)
+        protected async Task HandleLPopCommand(RedisProtocolParser.RESPMessage command, Socket socket)
         {
             var listName = command.GetKey();
             int popCount = 1; // Default pop count is 1
 
-            if ((command.arguments.Count == 3 && !hasBlock) && command.arguments.Count > 2 && int.TryParse(command.arguments[2], out int count))
+            if (command.arguments.Count > 2 && int.TryParse(command.arguments[2], out int count))
             {
                 popCount = count;
             }
 
-            if (!hasBlock && (!_redisList.ContainsKey(listName) || _redisList[listName].Count == 0))
+            if (!_redisList.ContainsKey(listName) || _redisList[listName].Count == 0)
             {
                 await SendResponse(ResponseHandler.NullResponse(), socket);
-                return;
-            }
-
-            Console.WriteLine($"Popping {popCount} items from list '{listName}'");
-
-            //TODO handle if block time is not valid number
-            long blockTime = -1; // Default to -1 (no blocking)
-            if (hasBlock)
-            {
-                blockTime = Convert.ToInt64(command.arguments[command.arguments.Count() - 1]);
-
-                Console.WriteLine($"Blocking pop for {listName} with block time {blockTime} ms");
-
-                var stopwatch = System.Diagnostics.Stopwatch.StartNew();
-                bool foundItem = false;
-                List<string> popedItems = new List<string>();
-
-                while (blockTime == 0 || stopwatch.ElapsedMilliseconds <= blockTime)
-                {
-                    if(!_redisList.ContainsKey(listName))
-                    {
-                        Console.WriteLine($"List '{listName}' does not exist, waiting for items to be added...");
-                        //await Task.Delay(100); // Wait before checking again
-                        continue;
-                    }
-
-                    Console.WriteLine($"Checking for items in list '{listName}' to pop {popCount}...");
-                    string[] itemsToPop = _redisList[listName].Take(popCount).ToArray();
-                    if (itemsToPop.Length > 0)
-                    {
-                        Console.WriteLine($"Found {itemsToPop.Length} items to pop from list '{listName}'");
-                        popedItems.AddRange(itemsToPop);
-                        _redisList[listName].RemoveRange(0, popCount);
-                        foundItem = true;
-                        break;
-                    }
-                }
-
-                popedItems.Insert(0, listName);
-
-                if (foundItem)
-                    await SendResponse(ResponseHandler.ArrayResponse(popedItems.ToArray()), socket);
-                else
-                    await SendResponse(ResponseHandler.NullResponse(), socket);
-
                 return;
             }
 
@@ -626,6 +587,43 @@ namespace codecrafters_redis.src
                 await SendResponse(ResponseHandler.SimpleResponse(items.First()), socket);
             else
                 await SendResponse(ResponseHandler.ArrayResponse(items.ToArray()), socket);
+        }
+
+        protected async Task HandleBlockLPopComand(RedisProtocolParser.RESPMessage command, Socket socket)
+        {
+            var listName = command.GetKey();
+            int waitTime = Convert.ToInt32(command.arguments[2]);
+
+            if (waitTime == 0)
+                waitTime = Timeout.Infinite;
+
+            var consumer = new Thread(async () => await WaitAndRespondeAsync(listName, socket, waitTime));
+            consumer.Start();
+            /*
+            (string item, Socket waitingSocket) = redisWaitableItem.WaitForItem(waitTime, socket);
+
+            if (item == null)
+            {
+                await SendResponse(ResponseHandler.NullResponse(), socket);
+                return;
+            }
+
+            _redisList[listName].Remove(item);
+            await SendResponse(ResponseHandler.ArrayResponse([listName, item]), socket);*/
+        }
+
+        private async Task WaitAndRespondeAsync(string listName, Socket socket, int waitTime)
+        {
+            (string item, Socket waitingSocket) = redisWaitableItem.WaitForItem(waitTime, socket);
+
+            if (item == null)
+            {
+                await SendResponse(ResponseHandler.NullResponse(), waitingSocket);
+                return;
+            }
+
+            _redisList[listName].Remove(item);
+            await SendResponse(ResponseHandler.ArrayResponse([listName, item]), waitingSocket);
         }
 
         protected async Task HandleRangeCommand(RedisProtocolParser.RESPMessage command, Socket socket)

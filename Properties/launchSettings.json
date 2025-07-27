@@ -1,7 +1,8 @@
 {
   "profiles": {
     "codecrafters-redis": {
-      "commandName": "Project"
+      "commandName": "Project",
+      "commandLineArgs": "BLPOP orange 0"
     }
   }
 }

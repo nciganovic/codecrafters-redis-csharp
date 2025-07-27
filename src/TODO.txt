@@ -56,6 +56,10 @@ XREAD
 echo -ne "*6\r\n\$5\r\nXREAD\r\n\$5\r\nblock\r\n\$5\r\n10000\r\n\$7\r\nstreams\r\n\$8\r\nsome_key\r\n\$3\r\n0-2\r\n" | nc localhost 6379
 echo -ne "*6\r\n\$5\r\nXREAD\r\n\$5\r\nblock\r\n\$1\r\n0\r\n\$7\r\nstreams\r\n\$8\r\nsome_key\r\n\$3\r\n0-1\r\n" | nc localhost 6379
 
+BLPOP
+echo -ne "*3\r\n\$5\r\nBLPOP\r\n\$6\r\norange\r\n\$1\r\n0\r\n" | nc localhost 6379
+echo -ne "*3\r\n\$5\r\nRPUSH\r\n\$6\r\norange\r\n\$6\r\nbanana\r\n" | nc localhost 6379
+
 Running another instance of Redis server
 cd C:\Users\nikol\Documents\Github\codecrafters-redis-csharp\bin\Debug\net8.0
 .\codecrafters-redis.exe --port 6380
