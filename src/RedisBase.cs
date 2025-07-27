@@ -542,6 +542,11 @@ namespace codecrafters_redis.src
                 return;
             }
 
+            if(startIndex < 0)
+                startIndex = _redisList[listName].Count + startIndex; // Handle negative indexing
+            if (endIndex < 0)
+                endIndex = _redisList[listName].Count + endIndex; // Handle negative indexing
+
             List<string> listValues = _redisList[listName].Skip(startIndex).Take(endIndex - startIndex + 1).ToList();
 
             SendResponse(ResponseHandler.ArrayResponse(listValues.ToArray()), socket);
