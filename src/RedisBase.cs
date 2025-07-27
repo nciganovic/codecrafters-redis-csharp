@@ -150,7 +150,11 @@ namespace codecrafters_redis.src
                     break;
 
                 case "LPOP":
-                    await HandleLPopCommand(command, socket);
+                    await HandleLPopCommand(command, socket, false);
+                    break;
+
+                case "BLPOP":
+                    await HandleLPopCommand(command, socket, true);
                     break;
 
                 case "LRANGE":
@@ -553,19 +557,57 @@ namespace codecrafters_redis.src
             await SendResponse(ResponseHandler.IntegerResponse(len), socket);
         }
 
-        protected async Task HandleLPopCommand(RedisProtocolParser.RESPMessage command, Socket socket)
+        protected async Task HandleLPopCommand(RedisProtocolParser.RESPMessage command, Socket socket, bool hasBlock)
         {
             var listName = command.GetKey();
             int popCount = 1; // Default pop count is 1
 
-            if (command.arguments.Count > 2 && int.TryParse(command.arguments[2], out int count))
+            if ((command.arguments.Count == 3 && !hasBlock) && command.arguments.Count > 2 && int.TryParse(command.arguments[2], out int count))
             {
                 popCount = count;
             }
 
-            if (!_redisList.ContainsKey(listName) || _redisList[listName].Count == 0)
+            if (!hasBlock && (!_redisList.ContainsKey(listName) || _redisList[listName].Count == 0))
             {
                 await SendResponse(ResponseHandler.NullResponse(), socket);
+                return;
+            }
+
+            Console.WriteLine($"Popping {popCount} items from list '{listName}'");
+
+            //TODO handle if block time is not valid number
+            long blockTime = -1; // Default to -1 (no blocking)
+            if (hasBlock)
+            {
+                blockTime = Convert.ToInt64(command.arguments[command.arguments.Count() - 1]);
+
+                var stopwatch = System.Diagnostics.Stopwatch.StartNew();
+                bool foundItem = false;
+                List<string> popedItems = new List<string>();
+
+                while (blockTime == 0 || stopwatch.ElapsedMilliseconds <= blockTime)
+                {
+                    if(!_redisList.ContainsKey(listName))
+                        continue;
+
+                    string[] itemsToPop = _redisList[listName].Take(popCount).ToArray();
+                    if (itemsToPop.Length > 0)
+                    {
+                        Console.WriteLine($"Found {itemsToPop.Length} items to pop from list '{listName}'");
+                        popedItems.AddRange(itemsToPop);
+                        _redisList[listName].RemoveRange(0, popCount);
+                        foundItem = true;
+                        break;
+                    }
+                }
+
+                popedItems.Insert(0, listName);
+
+                if (foundItem)
+                    await SendResponse(ResponseHandler.ArrayResponse(popedItems.ToArray()), socket);
+                else
+                    await SendResponse(ResponseHandler.NullResponse(), socket);
+
                 return;
             }
 
