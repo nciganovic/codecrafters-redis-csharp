@@ -141,6 +141,10 @@ namespace codecrafters_redis.src
                     HandlePushCommand(command, socket);
                     break;
 
+                case "LPUSH":
+                    HandlePushCommand(command, socket, true);
+                    break;
+
                 case "LRANGE":
                     HandleRangeCommand(command, socket);
                     break;
@@ -509,14 +513,20 @@ namespace codecrafters_redis.src
             SendResponse(simpleArrayResponse, socket);
         }
 
-        protected void HandlePushCommand(RedisProtocolParser.RESPMessage command, Socket socket)
+        protected void HandlePushCommand(RedisProtocolParser.RESPMessage command, Socket socket, bool prepend = false)
         {
             var listName = command.GetKey();
             List<string> valueToPush = command.arguments[2..];
 
             if(_redisList.ContainsKey(listName))
             {
-                _redisList[listName].AddRange(valueToPush);
+                if (prepend)
+                {
+                    valueToPush.Reverse();
+                    _redisList[listName].InsertRange(0, valueToPush);
+                }
+                else
+                    _redisList[listName].AddRange(valueToPush);
             }
             else
             {
@@ -525,7 +535,7 @@ namespace codecrafters_redis.src
 
             SendResponse(ResponseHandler.IntegerResponse(_redisList[listName].Count()), socket);
         }
-        
+
         protected void HandleRangeCommand(RedisProtocolParser.RESPMessage command, Socket socket)
         {
             var listName = command.GetKey();
